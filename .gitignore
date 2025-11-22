@@ -1,0 +1,55 @@
+# 数据文件目录
+data/
+db/
+all_coin/
+all_coin_history/
+data2/
+cache/
+factor_daily/
+factor/
+results/
+backtest_results/
+account_curve.png
+.cache/
+
+# Python 缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.csv
+*.png
+
+# 虚拟环境
+venv/
+env/
+.env
+.VSCodeCounter/
+
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# 配置文件（如果包含敏感信息）
+# config_local.py
+
+# 测试覆盖率报告
+htmlcov/
+.coverage
+.pytest_cache/
