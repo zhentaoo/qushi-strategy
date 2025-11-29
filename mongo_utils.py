@@ -4,6 +4,7 @@
 import pymongo
 import pandas as pd
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 # MongoDB数据库配置
@@ -55,6 +56,7 @@ def query_data(collection_name):
     else:
         print(f"从 {collection_name} 未查询到数据")
         return pd.DataFrame()
+
 
 # 分页查询数据库里的所有symbol
 def query_recent_data_by_symbol(collection_name, limit_per_symbol=1000, skip_per_symbol=0):
@@ -109,4 +111,44 @@ def delete_data(collection_name):
     
     print(f"清空 {collection_name} 集合，删除 {deleted_count} 条记录")
     return deleted_count
+
+def query_data_by_timestamp(collection_name, start_timestamp_str, end_timestamp_str):
+    db = get_db()
+    collection = db[collection_name]
+
+    try:
+        start_dt = pd.to_datetime(start_timestamp_str)
+        end_dt = pd.to_datetime(end_timestamp_str)
+
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
+
+        start_ms = int(start_dt.timestamp() * 1000)
+        end_ms = int(end_dt.timestamp() * 1000)
+
+        if start_ms > end_ms:
+            start_ms, end_ms = end_ms, start_ms
+
+        collection.create_index([("timestamp", 1)], background=True)
+
+        cursor = (
+            collection.find({'timestamp': {'$gte': start_ms, '$lte': end_ms}}, projection={'_id': 0})
+            .sort('timestamp', 1)
+        )
+        records = list(cursor)
+
+        if not records:
+            print(f"从 {collection_name} 未查询到数据")
+            return pd.DataFrame()
+
+        df = pd.DataFrame(records)
+        symbols_count = df['symbol'].nunique() if 'symbol' in df.columns else 0
+        print(f"从 {collection_name} 查询到 {len(df)} 条记录，包含 {symbols_count} 个币种，时间范围 {start_ms} 到 {end_ms}")
+        return df
+
+    except Exception as e:
+        print(f"查询 {collection_name} 失败: {e}")
+        return pd.DataFrame()
 

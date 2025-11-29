@@ -21,6 +21,18 @@ def compute_symbol_factor(kline_data, symbol='', coin_info={}, is_runtime=False)
 
     def _calc_group(g):
         g = g.copy()
+        
+        # 价格
+        g['prev_open'] = g['open'].shift(1)
+        g['prev_close'] = g['close'].shift(1)
+        g['prev_high'] = g['high'].shift(1)
+        g['prev_low'] = g['low'].shift(1)
+
+        g['prev2_open'] = g['open'].shift(2)
+        g['prev2_close'] = g['close'].shift(2)
+        g['prev2_high'] = g['high'].shift(2)
+        g['prev2_low'] = g['low'].shift(2)
+
         # 移动平均线
         g['ma5'] = g['close'].rolling(5).mean()
         g['prev_ma5'] = g['ma5'].shift(1)
@@ -47,11 +59,6 @@ def compute_symbol_factor(kline_data, symbol='', coin_info={}, is_runtime=False)
         g['roc_4'] = (g['close'] - g['close'].shift(4)) / g['close'].shift(4) * 100
 
         # 上一轮涨跌
-        g['prev_open'] = g['open'].shift(1)
-        g['prev_close'] = g['close'].shift(1)
-        g['prev2_open'] = g['open'].shift(2)
-        g['prev2_close'] = g['close'].shift(2)
-
         g['price_change_pct'] = g['close'].pct_change() * 100
         g['roc_1'] = (g['close'] - g['close'].shift(1)) / g['close'].shift(1) * 100
         

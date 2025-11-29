@@ -5,8 +5,8 @@ from datetime import datetime
 import mongo_utils
 from zoneinfo import ZoneInfo
 
-# 每次给 某个具体timestamp 下 topN的symbo数据
-def generate_signal(current_data, top_n = 40):
+# 给定当前时间切片的数据，计算开仓信号
+def generate_open_signal(current_data, top_n = 40):
     """
     先用btc的均线数据做周期判断
     在用TopN数据寻找目标标的
@@ -54,7 +54,7 @@ def generate_signal(current_data, top_n = 40):
         filtered_df = top_df[
             (top_df['roc_1'] < -1)
             & (top_df['roc_1'].shift(1) < -0.5)
-            & (top_df['roc_1'].shift(2) < -0.3)
+            & (top_df['roc_1'].shift(2) < 0)
         ].copy()
         side = 'SELL'
 
@@ -92,4 +92,23 @@ def generate_signal(current_data, top_n = 40):
     }
     return signal
 
+# 根据当前持仓，计算平仓信号
+def generate_close_signal(current_position, current_symbol_data):
+    """
+    生成平仓信号
+    """
+    # 检查当前持仓是否为空
+    if current_position is None:
+        return None
+    
+    if current_symbol_data is None:
+        return None
 
+    if current_symbol_data['close'] > current_symbol_data['prev_close']:
+        return {
+            'symbol': current_position['symbol'],
+            'timestamp': int(current_symbol_data['timestamp']),
+            'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
+            'side': 'SELL' if current_position['side'] == 'BUY' else 'BUY',
+        }
+    
