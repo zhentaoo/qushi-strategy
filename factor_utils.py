@@ -1,110 +1,82 @@
-"""
-因子计算工具模块
-包含K线数据处理和技术指标计算的通用函数
-"""
-
 import pandas as pd
 import numpy as np
-from datetime import datetime
-from zoneinfo import ZoneInfo
+import pandas_ta_classic as ta
 
-def compute_symbol_factor(kline_data, symbol='', coin_info={}, is_runtime=False):
-    # 简化版：假定存在 'symbol', 'interval', 'timestamp' 三列
-    df = kline_data.copy() if isinstance(kline_data, pd.DataFrame) else pd.DataFrame(kline_data)
+def safe_ta(result, col=None):
+    if result is None:
+        return np.nan
+    if col is None:
+        return result
+    return result[col]
 
-    # 统一数值类型
-    for col in ['open', 'high', 'low', 'close', 'volume', 'taker_buy_volume']:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # 全局排序（symbol, interval, timestamp）
-    df = df.sort_values(['symbol', 'interval', 'timestamp']).reset_index(drop=True)
-
-    def _calc_group(g):
-        g = g.copy()
-        
-        # 价格
-        g['prev_open'] = g['open'].shift(1)
-        g['prev_close'] = g['close'].shift(1)
-        g['prev_high'] = g['high'].shift(1)
-        g['prev_low'] = g['low'].shift(1)
-
-        g['prev2_open'] = g['open'].shift(2)
-        g['prev2_close'] = g['close'].shift(2)
-        g['prev2_high'] = g['high'].shift(2)
-        g['prev2_low'] = g['low'].shift(2)
-
-        # 移动平均线
-        g['ma5'] = g['close'].rolling(5).mean()
-        g['prev_ma5'] = g['ma5'].shift(1)
-        
-        g['ma10'] = g['close'].rolling(10).mean()
-        g['prev_ma10'] = g['ma10'].shift(1)
-        
-        g['ma20'] = g['close'].rolling(20).mean()
-        g['prev_ma20'] = g['ma20'].shift(1)
-        
-        g['ma30'] = g['close'].rolling(30).mean()
-        g['ma60'] = g['close'].rolling(60).mean()
-        g['ma96'] = g['close'].rolling(96).mean()
-
-        # 24h：4:24
-        g['roc_96'] = (g['close'] - g['close'].shift(96)) / g['close'].shift(96) * 100
-        # 16h 周期：4 * 16 = 64
-        g['roc_64'] = (g['close'] - g['close'].shift(64)) / g['close'].shift(64) * 100
-        # 8h 周期：4 * 8
-        g['roc_32'] = (g['close'] - g['close'].shift(32)) / g['close'].shift(32) * 100
-        # 4h 周期: 4 * 4
-        g['roc_16'] = (g['close'] - g['close'].shift(16)) / g['close'].shift(16) * 100
-        # 1h 周期
-        g['roc_4'] = (g['close'] - g['close'].shift(4)) / g['close'].shift(4) * 100
-
-        # 上一轮涨跌
-        g['price_change_pct'] = g['close'].pct_change() * 100
-        g['roc_1'] = (g['close'] - g['close'].shift(1)) / g['close'].shift(1) * 100
-        
-        # 成交量与量比
-        g['volume_ma5'] = g['volume'].rolling(5).mean()
-        g['volume_ma10'] = g['volume'].rolling(10).mean()
-        g['volume_ma60'] = g['volume'].rolling(60).mean()
-        g['volume_ma96'] = g['volume'].rolling(96).mean()
-        
-        g['volume_ratio_5'] = g['volume'] / g['volume_ma5']
-        g['volume_ratio_10'] = g['volume'] / g['volume_ma10']
-        g['volume_ratio_60'] = g['volume'] / g['volume_ma60']
-        g['volume_ratio_96'] = g['volume'] / g['volume_ma96']
-
-        # delta amount比: 主动买卖比例，ratio越高，做空动能越强
-        g['delta_amount_ratio'] = g['taker_buy_amount'] / g['taker_sell_amount']
-
-        # 上影线因子：上影线长度及其相对比例（对高低区间归一化）
-        g['upper_shadow'] = np.where(
-            g['close'] >= g['open'],
-            g['high'] - g['close'],
-            g['high'] - g['open']
-        )
-        g['upper_shadow_ratio'] = np.where(
-            (g['high'] - g['low']) > 0,
-            g['upper_shadow'] / (g['high'] - g['low']),
-            np.nan
-        )
-
-        # ATR波动指标
-        g['H-L']  = g['high'] - g['low']
-        g['H-PC'] = (g['high'] - g['close'].shift(1)).abs()
-        g['L-PC'] = (g['low'] - g['close'].shift(1)).abs()
-        g['tr'] = g[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-        g['atr'] = g['tr'].rolling(14).mean()
-
-        g['atr_prev'] = g['atr'].shift(1)
-        g['atr_change_pct'] = g['tr'] / g['atr_prev']
-
-        # 最终的分数指标
-        g['score'] = np.abs(g['roc_1']) + g['volume_ratio_10'] + 2 * g['delta_amount_ratio']
-        g['prev1_score'] = g['score'].shift(1)
-        g['prev2_score'] = g['score'].shift(2)
+def compute_single_symbol_factor(g: pd.DataFrame):
+    """
+    g: 单 symbol + 单 interval + 已按时间排序
+    """
+    if len(g) < 65:
         return g
 
-    # 分组计算（symbol+interval）
-    df = df.groupby(['symbol', 'interval'], group_keys=False).apply(_calc_group)
-    
-    return df
+    g = g.sort_values('timestamp').copy()
+
+    # ========= price shift =========
+    for n in [1, 2, 3]:
+        for col in ['open', 'close', 'high', 'low']:
+            g[f'{col}_prev{n}'] = g[col].shift(n)
+
+    # ========= MA =========
+    for n in [5, 10, 15, 20, 30, 60, 96]:
+        g[f'ma{n}'] = ta.sma(g['close'], length=n)
+        g[f'ma{n}_pre1'] = g[f'ma{n}'].shift(1)
+        g[f'ma{n}_pre2'] = g[f'ma{n}'].shift(2)
+        g[f'ma{n}_pre3'] = g[f'ma{n}'].shift(3)
+
+    # ========= ROC =========
+    for n in [1, 4, 16, 32, 64, 96]:
+        g[f'roc_{n}'] = g['close'].pct_change(n) * 100
+
+    # ========= volume MA & ratio =========
+    for n in [5, 10, 20, 60, 96]:
+        g[f'volume_ma_{n}'] = g['volume'].rolling(n, min_periods=n).mean()
+        g[f'volume_ratio_{n}'] = g['volume'] / g[f'volume_ma_{n}']
+
+    # ========= Bollinger =========
+    bb = ta.bbands(g['close'], length=20, std=2)
+
+    if bb is None:
+        g['bollinger_mid'] = np.nan
+        g['bollinger_upper'] = np.nan
+        g['bollinger_lower'] = np.nan
+    else:
+        g['bollinger_mid'] = bb['BBM_20_2.0']
+        g['bollinger_upper'] = bb['BBU_20_2.0']
+        g['bollinger_lower'] = bb['BBL_20_2.0']
+
+    # ========= ATR =========
+    g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=14)
+
+
+    # ========= ADX =========
+    adx = ta.adx(g['high'], g['low'], g['close'], length=14)
+    g['adx'] = safe_ta(adx, 'ADX_14')
+
+    # ========= delta ratio（安全处理） =========
+    eps = 1e-8
+    g['delta_buy_ratio'] = g['taker_buy_amount'] / (g['taker_sell_amount'] + eps)
+    g['delta_sell_ratio'] = g['taker_sell_amount'] / (g['taker_buy_amount'] + eps)
+
+    return g
+
+
+def compute_symbol_factor(df: pd.DataFrame):
+    """
+    df: 单一 interval 的整张表，包含多个 symbol
+    """
+    df = df.sort_values(['symbol', 'timestamp'])
+
+    result = []
+
+    for symbol, g in df.groupby('symbol'):
+        g = compute_single_symbol_factor(g)
+        result.append(g)
+
+    return pd.concat(result, ignore_index=True)

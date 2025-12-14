@@ -87,7 +87,7 @@ def fetch_incremental_klines(symbol: str, start_ts: int, end_ts: int) -> pd.Data
         return pd.DataFrame()
 
 
-def run_incremental_update():
+def main():
     print("=== 开始增量获取15分钟K线数据 ===", datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'))
 
     symbols = get_existing_symbols()
@@ -140,4 +140,4 @@ def run_incremental_update():
     print(f"=== 增量更新完成，新增 {total_new} 条记录 ===", datetime.now(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'))
 
 if __name__ == '__main__':
-    run_incremental_update()
+    main()
