@@ -6,19 +6,19 @@ import mongo_utils
 from zoneinfo import ZoneInfo
 
 # 给定当前时间切片的数据，计算开仓信号
-def generate_open_signal(current_data, top_n = 50):
+def generate_open_signal(current_data, top_n = 30):
     """
     先用btc的均线数据做周期判断
     在用TopN数据寻找目标标的
     """
-    # 过滤掉roc_64为空或无效的数据
-    valid_data = current_data.dropna(subset=['roc_64'])
+    # 过滤掉roc_96为空或无效的数据
+    valid_data = current_data.dropna(subset=['roc_96'])
     if valid_data.empty:
         return None
 
     # 降序排序，取前N个
-    top_df = valid_data.nlargest(top_n, 'roc_64')
-    pos_cnt = (top_df['roc_64'] > 0).sum()
+    top_df = valid_data.nlargest(top_n, 'roc_96')
+    pos_cnt = (top_df['roc_96'] > 0).sum()
     ratio = pos_cnt / top_n
 
     filtered_df = pd.DataFrame()
@@ -30,14 +30,24 @@ def generate_open_signal(current_data, top_n = 50):
 
     side = None
 
+    print('top_df')
+    print(top_df)
+
     # 顺势做多
     if season == 'summer':
         filtered_df = top_df[
-            (top_df['adx'] > 35)
-            & (top_df['volume_ratio_10'] > 1.2)
+            # (top_df['adx'] > 20)
+            # & (top_df['volume_ratio_10'] > 1.1)
+            # & (top_df['ma3'] > top_df['ma5'])
+            # & (top_df['ma5'] > top_df['ma20'])
+            # & (top_df['close'] > top_df['donchian_upper'])
+            # & (top_df['close_pre1'] > top_df['donchian_upper_pre1'])
+            (top_df['close'] > top_df['ma15'])
+            & (top_df['close_pre1'] > top_df['ma15_pre1'])
+            & (top_df['close_pre2'] > top_df['ma15_pre2'])
+            & (top_df['close_pre3'] < top_df['ma15_pre3'])
             & (top_df['ma5'] > top_df['ma15'])
-            & (top_df['close'] > top_df['ma5'])
-            & (top_df['close_prev1'] > top_df['ma5_pre1'])
+            & (top_df['volume'] > top_df['volume_ma_10'] * 3.5)
         ].copy()
         side = 'BUY'
 
@@ -46,7 +56,7 @@ def generate_open_signal(current_data, top_n = 50):
         return None
 
     # 选择得分最高的
-    best = (filtered_df.sort_values(by='roc_64', ascending=False)).iloc[0]
+    best = (filtered_df.sort_values(by='roc_96', ascending=False)).iloc[0]
     symbol = best['symbol']
     
     print(f"选择信号: {symbol} | season={season} | side={side}")
@@ -61,9 +71,9 @@ def generate_open_signal(current_data, top_n = 50):
         'volume_ratio_10': float(best['volume_ratio_10']) if not pd.isna(best.get('volume_ratio_10')) else None,
         'close': float(best['close']) if not pd.isna(best.get('close')) else None,
         'open': float(best['open']) if not pd.isna(best.get('open')) else None,
-        'priceChangePercent': float(best.get('roc_64', 0.0)),
+        'priceChangePercent': float(best.get('roc_96', 0.0)),
         'market_season': season,
-        'roc_64': best.get('roc_64'),
+        'roc_96': best.get('roc_96'),
     }
     return signal
 
@@ -79,7 +89,10 @@ def generate_close_signal(current_position, current_symbol_data):
     if current_symbol_data is None:
         return None
 
-    if current_symbol_data['close'] < current_symbol_data['ma10']:
+    if (
+        current_symbol_data['close'] < current_symbol_data['ma5']
+        or current_symbol_data['roc_1'] < current_symbol_data['ma5']
+    ):
         return {
             'symbol': current_position['symbol'],
             'timestamp': int(current_symbol_data['timestamp']),

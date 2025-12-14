@@ -267,7 +267,7 @@ def main():
                 else:
                     profit = qty * (exit_price - entry_price)
 
-                profit_pct = (profit / margin * 100.0) if margin != 0 else 0.0
+                profit_pct = (profit / (margin * leverage) * 100.0) if margin != 0 else 0.0
                 cash_balance = cash_balance + profit
 
                 sign_close_time_str = close_signal['date_str'] if close_signal else datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
@@ -292,10 +292,7 @@ def main():
                     'adverse_move_pct': adverse_pct,
                     'quantity': qty,
                     'final_balance': cash_balance,
-                    'side': 'BUY',
-                    'market_season': current_position.get('market_season'),
-                    'roc_64': current_position.get('roc_64'),
-                    'prev2_score': current_position.get('prev2_score'),
+
                     'margin': margin,
                     'leverage': leverage,
                     'stop_out': stop_out,
