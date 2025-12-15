@@ -175,6 +175,7 @@ def main():
         print(window_time)
         print(f"\n=== 时间窗口 {idx}/{len(time_windows)-1} ===")
         print(f"当前时间: {datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"当前账户余额: {cash_balance:.2f} USDT")
 
         # 开仓信号：没有持仓的时候进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
         if current_position is None:
