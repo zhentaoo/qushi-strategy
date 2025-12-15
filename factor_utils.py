@@ -62,7 +62,7 @@ def compute_single_symbol_factor(g: pd.DataFrame):
 
     # ========= ATR =========
     g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=14).shift(1)
-    g['natr'] = g['atr'] / g['close']
+    g['natr'] = g['atr'] / g['close'] * 100
 
     # ========= ADX =========
     adx = ta.adx(g['high'], g['low'], g['close'], length=14)

@@ -165,47 +165,47 @@ def main():
     
     # 4 回测循环
     for idx in range(100, len(time_windows) - 1):
-        pre_window_time = time_windows[idx - 1]
         window_time = time_windows[idx]
         next_window_time = time_windows[idx + 1]
+
+        current_data = processed_df[processed_df['timestamp'] == window_time]
+        next_data = processed_df[processed_df['timestamp'] == next_window_time]
 
         # 当前时间窗口，所有币对的 指标/因子数据
         print(window_time)
         print(f"\n=== 时间窗口 {idx}/{len(time_windows)-1} ===")
         print(f"当前时间: {datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
 
-        # 开仓信号：没有持仓的时候，进行开仓逻辑计算，主要依靠generate_open_signal方法
+        # 开仓信号：没有持仓的时候进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
         if current_position is None:
             print('当前无持仓, 计算开仓信号')
 
-            current_data = processed_df[processed_df['timestamp'] == window_time]
             signal = generate_open_signal(current_data)
             
             if signal is None:
                 print('无开仓信号')
                 continue
 
-            margin = 50
-            leverage = 20
+            margin = 200
+            leverage = 5
 
             if cash_balance < margin:
                 print(f"资金不足 ({cash_balance:.2f} USDT)<{margin}，跳过开仓")
                 continue
 
-            entry_row = processed_df[(processed_df['symbol'] == signal['symbol']) & (processed_df['timestamp'] == next_window_time)]
-            if entry_row.empty:
-                continue
-
+            entry_row = next_data[next_data['symbol'] == signal['symbol']]
             entry_price = float(entry_row.iloc[0]['open'])
             quantity = (margin * leverage) / entry_price
 
             current_position = {
                 'symbol': signal['symbol'],
+                'side': 'BUY',
                 'sign_open_time': window_time,
                 'sign_open_time_str': datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                 'trade_open_time': next_window_time,
                 'trade_open_time_str': datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                 'entry_price': entry_price,
+                'highest_price': entry_price,
                 'quantity': quantity,
                 'margin': margin,
                 'leverage': leverage,
@@ -213,89 +213,58 @@ def main():
             print(f"开仓: {current_position['symbol']} 做多 价格: {entry_price:.6f} 数量: {quantity:.6f}")
             continue
         
-        # 平仓信号：有持仓的时候，计算当前持仓的盈亏
-        elif current_position is not None:
-            print('当前有持仓, 计算平仓信号或检查爆仓')
-
-            current_symbol_row_df = processed_df[(processed_df['symbol'] == current_position['symbol']) & (processed_df['timestamp'] == window_time)]
-            
-            if current_symbol_row_df.empty:
-                continue
-            
+        # 平仓信号：有持仓的时候，计算当前持仓的盈亏（当前k就可以平仓，因为）
+        if current_position is not None:
+            # print('当前有持仓, 计算平仓信号')
+            current_symbol_row_df = current_data[current_data['symbol'] == current_position['symbol']]
             current_symbol_row = current_symbol_row_df.iloc[0]
             
-            # 1. 检查是否爆仓 (Liquidation Check)
-            entry_price = float(current_position['entry_price'])
-            leverage = current_position.get('leverage', 10)
-            threshold_pct = 100.0 / leverage if leverage > 0 else 100.0
-            
-            # 做多爆仓价格 = 入场价 * (1 - 阈值%)
-            liquidation_price = entry_price * (1 - threshold_pct / 100.0)
-            current_low = float(current_symbol_row['low'])
-            
-            is_liquidated = current_low <= liquidation_price
-            
-            # 2. 计算平仓信号
+            # 更新最高价，用来做平仓信号判断
+            current_high = float(current_symbol_row['high'])
+            if current_high > current_position['highest_price']:
+                current_position['highest_price'] = current_high
+
+            # 2. 计算平仓信号 (包含 固定5%止损 和 ATR动态止盈)
             close_signal = generate_close_signal(current_position, current_symbol_row)
             
-            if is_liquidated:
-                print(f"触发爆仓: 当前最低价 {current_low} <= 强平价 {liquidation_price}")
-            
             if close_signal is not None:
-                print(f"平仓信号: {close_signal['date_str']}")
-
-            if close_signal is not None or is_liquidated:
-                exit_row = processed_df[(processed_df['symbol'] == current_position['symbol']) & (processed_df['timestamp'] == next_window_time)]
-                if exit_row.empty:
-                    continue
+                print(f"平仓信号: {close_signal['date_str']} 原因: {close_signal.get('reason', 'signal')}")
                 
-                exit_price = float(exit_row.iloc[0]['open'])
+                # 确定平仓价格
+                # 如果是固定止损(Low触发)，价格为止损价；如果是ATR(Close触发)，价格为收盘价
+                exit_price = float(close_signal.get('stop_price', current_symbol_row['close']))
+
+                entry_price = float(current_position['entry_price'])
                 qty = float(current_position['quantity'])
                 margin = float(current_position.get('margin', 100.0))
+                leverage = current_position.get('leverage', 10)
 
-                # 计算持有期间的最大回撤
-                period_df = processed_df[(processed_df['symbol'] == current_position['symbol']) & (processed_df['timestamp'] >= int(current_position['trade_open_time'])) & (processed_df['timestamp'] <= int(next_window_time))]
-                
-                # Only BUY logic
-                low_price = float(period_df['low'].min()) if not period_df.empty else exit_price
-                adverse_pct = max(0.0, (entry_price - low_price) / entry_price * 100.0)
-
-                stop_out = adverse_pct >= threshold_pct
-                
-                if stop_out:
-                    profit = -margin
-                else:
-                    profit = qty * (exit_price - entry_price)
-
+                profit = qty * (exit_price - entry_price)
                 profit_pct = (profit / (margin * leverage) * 100.0) if margin != 0 else 0.0
                 cash_balance = cash_balance + profit
-
-                sign_close_time_str = close_signal['date_str'] if close_signal else datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')
-                sign_close_timestamp = close_signal['timestamp'] if close_signal else window_time
 
                 record = {
                     'symbol': current_position['symbol'],
                     'signal_open_time_str': current_position['sign_open_time_str'],
                     'trade_open_time_str': current_position['trade_open_time_str'],
-                    'sign_close_time_str': sign_close_time_str,
-                    'trade_close_time_str': datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
+                    'trade_close_time_str': close_signal['date_str'], # 当前K线内平仓
 
                     'signal_open_timestamp': int(current_position['sign_open_time']),
                     'trade_open_timestamp': int(current_position['trade_open_time']),
-                    'sign_close_timestamp': sign_close_timestamp,
-                    'trade_close_timestamp': next_window_time,
+                    'trade_close_timestamp': close_signal['timestamp'],
                     
                     'entry_price': entry_price,
                     'exit_price': exit_price,
                     'profit': profit,
                     'profit_pct': profit_pct,
-                    'adverse_move_pct': adverse_pct,
+                    'adverse_move_pct': 0.0, 
                     'quantity': qty,
                     'final_balance': cash_balance,
+                    'side': current_position['side'],
 
                     'margin': margin,
                     'leverage': leverage,
-                    'stop_out': stop_out,
+                    'stop_out': 'Stop' in close_signal.get('reason', ''),
                 }
 
                 trade_records_list.append(record)
