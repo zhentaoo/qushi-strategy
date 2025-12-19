@@ -11,20 +11,82 @@ from zoneinfo import ZoneInfo
 # 2. 平仓信号直接根据当前数据的涨跌给定的
 # 也就是说，开仓动作是延迟的，平仓动作是即时的
 
+def generate_open_signal(current_data, top_n=30):
+
+    valid_data = current_data.dropna(subset=['roc_64'])
+    if valid_data.empty:
+        return None
+
+    # 按强度排序（不是只看涨幅）
+    valid_data["score"] = (
+        valid_data["roc_64"] * 0.4 + 
+        valid_data["volume_ratio_10"] * 0.3 +
+        valid_data["adx"] * 0.3
+    )
+
+    top_df = valid_data.nlargest(top_n, 'score')
+
+    # 情绪（市场季节）弱化简单阈值问题
+    pos_ratio = (top_df["roc_64"] > 0).sum() / len(top_df)
+
+    if pos_ratio > 0.70:
+        season = "summer"
+    else:
+        season = "winter"
+
+    if season != "summer":
+        return None  # 只顺势做多
+
+    filtered_df = top_df[
+        (top_df["close"] > top_df["ma5"]) &
+        (top_df["ma5"] > top_df["ma20"]) &
+        ((top_df["ma5"] - top_df["ma20"]) / top_df["ma20"] > 0.005) &    # ma斜率强度确认
+        (top_df["adx"] > 25) &
+        (top_df["plus_di"] > top_df["minus_di"]) &
+        (top_df["volume_ratio_10"] > 1.6) &  # 量能确认
+        (top_df["atr"] / top_df["close"] < 0.06)  # 波动率过滤，过滤过于尖峰币
+    ].copy()
+
+    if filtered_df.empty:
+        return None
+
+    best = filtered_df.sort_values(by='score', ascending=False).iloc[0]
+
+    signal = {
+        "symbol": best["symbol"],
+        "timestamp": int(best["timestamp"]),
+        "date_str": datetime.fromtimestamp(
+            int(best["timestamp"])/1000, 
+            tz=ZoneInfo('Asia/Shanghai')
+        ).strftime('%Y-%m-%d %H:%M:%S'),
+        "side": "BUY",
+        "price": float(best["close"]),
+        "volume_ratio_10": float(best["volume_ratio_10"]),
+        "roc_64": float(best["roc_64"]),
+        "adx": float(best["adx"]),
+        "market_season": season,
+        "score": float(best["score"])
+    }
+
+    print(f"✔ BUY SIGNAL: {signal['symbol']} | score={signal['score']:.2f}")
+
+    return signal
+
+
 # 给定当前时间切片的数据，计算开仓信号
 def generate_open_signal(current_data, top_n = 30):
     """
     先用btc的均线数据做周期判断
     在用TopN数据寻找目标标的
     """
-    # 过滤掉roc_96为空或无效的数据
-    valid_data = current_data.dropna(subset=['roc_96'])
+    # 过滤掉roc_64为空或无效的数据
+    valid_data = current_data.dropna(subset=['roc_64'])
     if valid_data.empty:
         return None
 
     # 降序排序，取前N个
-    top_df = valid_data.nlargest(top_n, 'roc_96')
-    pos_cnt = (top_df['roc_96'] > 0).sum()
+    top_df = valid_data.nlargest(top_n, 'roc_64')
+    pos_cnt = (top_df['roc_64'] > 0).sum()
     ratio = pos_cnt / top_n
 
     filtered_df = pd.DataFrame()
@@ -39,12 +101,13 @@ def generate_open_signal(current_data, top_n = 30):
     # 顺势做多
     if season == 'summer':
         filtered_df = top_df[
-            (top_df['close'] > top_df['ma15'])
-            & (top_df['close_pre1'] > top_df['ma15_pre1'])
-            & (top_df['close_pre2'] > top_df['ma15_pre2'])
-            & (top_df['close_pre3'] < top_df['ma15_pre3'])
-            & (top_df['ma5'] > top_df['ma15'])
-            & (top_df['volume'] > top_df['volume_ma_10'] * 3.5)
+            (top_df['close'] > top_df['ma5'])
+            & (top_df['close_pre1'] > top_df['ma5_pre1'])
+            & (top_df['close_pre2'] > top_df['ma5_pre2'])
+            & (top_df['close_pre3'] > top_df['ma5_pre3'])
+            & (top_df['ma5'] > top_df['ma20'])
+            & (top_df['volume'] > top_df['volume_ma_10'] * 2.5) #必要条件，否则胜率和收益率大幅下降
+            & (top_df['adx'] > 45) # 329.67%
         ].copy()
         side = 'BUY'
 
@@ -53,7 +116,7 @@ def generate_open_signal(current_data, top_n = 30):
         return None
 
     # 选择得分最高的
-    best = (filtered_df.sort_values(by='roc_96', ascending=False)).iloc[0]
+    best = (filtered_df.sort_values(by='roc_64', ascending=False)).iloc[0]
     symbol = best['symbol']
     
     print(f"选择信号: {symbol} | season={season} | side={side}")
@@ -68,9 +131,8 @@ def generate_open_signal(current_data, top_n = 30):
         'volume_ratio_10': float(best['volume_ratio_10']) if not pd.isna(best.get('volume_ratio_10')) else None,
         'close': float(best['close']) if not pd.isna(best.get('close')) else None,
         'open': float(best['open']) if not pd.isna(best.get('open')) else None,
-        'priceChangePercent': float(best.get('roc_96', 0.0)),
+        'priceChangePercent': float(best.get('roc_64', 0.0)),
         'market_season': season,
-        'roc_96': best.get('roc_96'),
     }
     return signal
 
@@ -78,39 +140,21 @@ def generate_open_signal(current_data, top_n = 30):
 def generate_close_signal(current_position, current_symbol_data):
     """
     生成平仓信号
-    1. 固定止损：亏损5% (Check Low)
-    2. ATR动态止盈：(Check Close)
+    ATR动态止盈：(Check Close)
     """
     # 检查当前持仓是否为空
     if current_position is None or current_symbol_data is None:
         return None
 
-    close_price = float(current_symbol_data['close'])
     low_price = float(current_symbol_data['low'])
-    entry_price = float(current_position['entry_price'])
     highest_price = float(current_position.get('highest_price'))
-    atr = float(current_symbol_data.get('atr', 0))
-    
-    # 固定亏损5%退出
-    fixed_stop_loss_price = entry_price * 0.95
-    
+    close_price = float(current_symbol_data['close'])
+    atr = float(current_symbol_data.get('atr', 0))    
+
     # ATR动态止盈退出
-    atr_stop_price = highest_price - (1.4 * atr)
+    atr_stop_price = highest_price - (1.1 * atr)
 
-    # 1. 固定止损逻辑：亏损5%
-    # 假设做多，价格下跌5%即止损
-    if low_price <= fixed_stop_loss_price:
-        return {
-            'symbol': current_position['symbol'],
-            'timestamp': int(current_symbol_data['timestamp']),
-            'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
-            'side': 'SELL',
-            'reason': 'Fixed_Stop_Loss_5pct',
-            'stop_price': fixed_stop_loss_price,
-            'price_type': 'fixed_stop_loss_price' # 标记是基于最低价触发
-        }
-
-    # 2. ATR动态止盈 
+    # ATR动态止盈 
     if low_price < atr_stop_price:
         return {
             'symbol': current_position['symbol'],
@@ -123,3 +167,4 @@ def generate_close_signal(current_position, current_symbol_data):
         }
     
     return None
+    

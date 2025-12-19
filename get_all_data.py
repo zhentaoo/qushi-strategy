@@ -2,13 +2,11 @@
 # -*- coding: utf-8 -*-
 
 import pandas as pd
-import numpy as np
 import time
-from datetime import datetime, timedelta, timezone
-import pytz
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import mongo_utils
 import api_core
-import factor_utils
 import argparse
 
 def get_exchange_info():
@@ -48,204 +46,178 @@ def get_exchange_info():
         print(f"获取交易所信息失败: {e}")
         return None, None
 
-def collect_all_data():
-    """收集所有数据的主函数"""
-    print("=== 开始收集数据 ===", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    
-    # 清空旧数据
-    print("清空旧数据")
-    mongo_utils.delete_data('coins')
-    mongo_utils.delete_data('coin_history')
-    
+import concurrent.futures
+
+def process_symbol(symbol, symbol_info, start_ts, current_ts, interval, interval_ms, collection_name):
+    """处理单个币种的数据抓取"""
+    try:
+        # 1. 确定该币种的抓取起始时间
+        ts = start_ts
+        
+        # 获取上线时间，避免请求上线前的数据
+        onboard_date = symbol_info.get('onboardDate')
+        if onboard_date:
+            ts = max(ts, int(onboard_date))
+        
+        # 查询数据库中该币种最新的K线时间
+        db = mongo_utils.get_db()
+        col = db[collection_name]
+        last_record = col.find_one({'symbol': symbol}, sort=[('timestamp', -1)])
+        
+        if last_record:
+            last_ts = last_record.get('timestamp')
+            next_ts = last_ts + interval_ms
+            ts = max(ts, next_ts)
+        
+        if ts >= current_ts:
+            print(f"✅ {symbol} 数据已是最新")
+            return 0
+
+        print(f"🚀 {symbol} 开始抓取，起点: {pd.to_datetime(ts, unit='ms', utc=True).astimezone(ZoneInfo('Asia/Shanghai'))}")
+
+        # 2. 循环抓取直到当前时间
+        symbol_new_count = 0
+        while ts < current_ts:
+            try:
+                limit = 900
+                kline_data = api_core.get_klines(
+                    symbol, interval=interval, limit=limit, startTime=ts
+                )
+                
+                if kline_data is None or kline_data.empty:
+                    print(f"⚠️ {symbol} 无返回数据")
+                    break
+                
+                count = len(kline_data)
+                mongo_utils.insert_data(collection_name, kline_data)
+                symbol_new_count += count
+                
+                last_kline_ts = int(kline_data.iloc[-1]['timestamp'])
+                ts = last_kline_ts + interval_ms
+                
+                # print(f"   -> {symbol} 获取 {count} 条，最新: {pd.to_datetime(last_kline_ts, unit='ms', utc=True).astimezone(ZoneInfo('Asia/Shanghai'))}")
+
+                if count < limit:
+                    break
+                
+                # 稍微休息一下，避免单个线程请求过快
+                time.sleep(0.5)
+                
+            except Exception as e:
+                print(f"❌ {symbol} 抓取出错: {e}")
+                break
+        
+        if symbol_new_count > 0:
+            print(f"✅ {symbol} 完成，新增 {symbol_new_count} 条")
+        return symbol_new_count
+
+    except Exception as e:
+        print(f"❌ {symbol} 处理异常: {e}")
+        return 0
+
+def collect_kline_data(start_date_str='2025-01-01', interval='1h', max_workers=9):
+    """
+    收集K线数据
+    :param start_date_str: 开始时间，格式 'YYYY-MM-DD'
+    :param interval: K线间隔，如 '1h', '5m'
+    """
+    print(f"=== 开始收集 {interval} K线数据 ===", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print(f"目标开始时间: {start_date_str}")
+
     # 1. 获取交易所信息和有效交易对
     valid_symbols, _ = get_exchange_info()
     if not valid_symbols:
         print("获取交易所信息失败，退出")
         return
-    
-    # 2. 获取所有有效交易对的5分钟K线数据
-    all_coin_history_5m = pd.DataFrame()
-    coins_to_save = []
-    
-    print(f"开始获取 {len(valid_symbols)} 个交易对的5分钟K线数据...")
-    
-    for i, symbol in enumerate(valid_symbols.keys(), 1):
-        print(f"处理进度: {i}/{len(valid_symbols)} - {symbol}")
-        
-        # 获取1400根5分钟K线
-        kline_data = get_kline_data(symbol, interval='5m', limit=1400)
-        if not kline_data:
-            continue
-        
-        # 处理5分钟K线数据
-        if symbol_df_5m is None:
-            continue
-        
-        # 合并5分钟K线数据
-        all_coin_history_5m = pd.concat([all_coin_history_5m, symbol_df_5m], ignore_index=True)
-        
-        # 保存5分钟K线到MongoDB
-        mongo_utils.insert_data('coin_history', symbol_df_5m)
-        print(f"成功获取并保存 {symbol} 的 {len(symbol_df_5m)} 条5分钟K线数据")
-        
-        # 准备保存币种信息
-        coins_to_save.append({
-            'symbol': symbol,
-            'priceChangePercent': 0,  # 默认值
-            'ts': int(time.time() * 1000),
-            'date_str': datetime.now(tz=timezone(timedelta(hours=8))).strftime('%Y-%m-%d %H:%M:%S'),
-            'interval': '5m'
-        })
-        
-        # 每处理50个币种休息一下，避免API限制
-        if i % 50 == 0:
-            print(f"已处理 {i} 个币种，休息2秒...")
-            time.sleep(2)
-    
-    # 保存币种数据
-    if coins_to_save:
-        df = pd.DataFrame(coins_to_save)
-        mongo_utils.insert_data('coins', df)
-        print(f"保存 {len(df)} 个币种数据")
-    
-    print(f"总共收集 {len(all_coin_history_5m)} 条5分钟K线数据")
-    print("=== 数据收集完成 ===", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-def collect_15min_kline_data():
-    # 1. 获取交易所信息和有效交易对
-    mongo_utils.delete_data('symbol_15min_valid_symbols')
-
-    valid_symbols, _ = get_exchange_info()
-    if not valid_symbols:
-        print("获取交易所信息失败，退出")
-        return
-
-    # 保存有效交易对列表到symbol_15min_valid_symbols集合
+    # 保存有效交易对列表
     symbol_list = list(valid_symbols.keys())
     valid_symbols_data = [{'symbol': symbol, 'timestamp': int(time.time() * 1000)} for symbol in symbol_list]
-    mongo_utils.insert_data('symbol_15min_valid_symbols', valid_symbols_data)
+    mongo_utils.insert_data(f'symbol_{interval}_valid_symbols', valid_symbols_data)
     
-    # 批量保存交易对详细信息到MongoDB
+    # 批量保存交易对详细信息
     symbol_details_list = []
     for symbol, symbol_info in valid_symbols.items():
-        # 创建新的字典，避免修改原始数据
-        record = {}
-        for key, value in symbol_info.items():
-            record[key] = value
+        record = symbol_info.copy()
         record['timestamp'] = int(time.time() * 1000)
         symbol_details_list.append(record)
     
-    # 一次性批量插入所有交易对详细信息
     if symbol_details_list:
-        result = mongo_utils.insert_data('symbol_details', symbol_details_list)
-        print(f"批量插入 {len(symbol_details_list)} 个交易对详细信息到MongoDB，实际插入: {result} 条记录")
+        mongo_utils.insert_data('symbol_details', symbol_details_list)
     
-    # 清空旧数据
-    print("清空旧数据")
-    mongo_utils.delete_data('symbol_15min_kline')
+    # 2. 准备时间参数
+    interval_map = {
+        '1m': 60 * 1000,
+        '3m': 3 * 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '30m': 30 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '2h': 2 * 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '6h': 6 * 60 * 60 * 1000,
+        '8h': 8 * 60 * 60 * 1000,
+        '12h': 12 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000,
+    }
+    interval_ms = interval_map.get(interval)
+    if not interval_ms:
+        print(f"不支持的时间间隔: {interval}")
+        return
+
+    # 解析开始时间为毫秒时间戳 (默认视为北京时间)
+    try:
+        start_dt = pd.to_datetime(start_date_str)
+        if start_dt.tzinfo is None:
+            # 假设输入是北京时间
+            start_dt = start_dt.replace(tzinfo=ZoneInfo('Asia/Shanghai'))
+        start_ts = int(start_dt.timestamp() * 1000)
+    except Exception as e:
+        print(f"时间格式解析错误: {e}")
+        return
+
+    collection_name = f'symbol_{interval}_kline'
+    db = mongo_utils.get_db()
+    col = db[collection_name]
     
-    # 2. 获取所有有效交易对的15分钟K线数据
+    # 创建索引
+    try:
+        col.create_index([('symbol', 1), ('timestamp', 1)], unique=True, background=True)
+    except Exception:
+        pass
+
     total_klines_count = 0
+    print(f"开始获取 {len(valid_symbols)} 个交易对的数据...")
     
-    print(f"开始获取 {len(valid_symbols)} 个交易对的15分钟K线数据...")
+    # 获取当前时间戳作为统一的结束时间，避免不同币种抓取时间不一致
+    current_ts = int(time.time() * 1000)
     
-    for i, symbol in enumerate(valid_symbols.keys(), 1):
-        print(f"处理进度: {i}/{len(valid_symbols)} - {symbol}")
-        
-        # 用于存储该币对的所有K线数据（DataFrame列表）
-        all_symbol_klines = [] 
-        
-        db = mongo_utils.get_db()
-        col = db['symbol_15min_kline']
-        try:
-            col.create_index([('symbol', 1), ('timestamp', 1)], background=True)
-        except Exception:
-            pass
-
-        # 15分钟K线的时间间隔（毫秒）
-        interval_ms = 15 * 60 * 1000  # 15分钟 = 900,000毫秒
-        
-        # 获取当前时间戳作为结束时间
-        current_time = int(time.time() * 1000)
-        
-        # 分5次获取，每次1000条，总共最多5000条
-        for batch in range(30):
-            if batch == 0:
-                continue
-            try:
-                # 计算这一批的结束时间和开始时间
-                end_time = current_time - (batch * 1000 * interval_ms)
-                start_time = end_time - (1000 * interval_ms)
-                
-                print(f"📊 {symbol} 批次 {batch+1}/5 时间范围: {pd.to_datetime(start_time, unit='ms')} 到 {pd.to_datetime(end_time, unit='ms')}")
-                
-                try:
-                    exists = col.find_one({'symbol': symbol, 'timestamp': {'$gte': start_time, '$lte': end_time}})
-                except Exception:
-                    exists = None
-                if exists:
-                    print(f"⏭️ {symbol} 批次 {batch+1}/5 数据已存在，跳过")
-                    time.sleep(0.05)
-                    continue
-
-                # 获取15分钟K线数据
-                kline_data = api_core.get_klines(
+    print(f"使用 {max_workers} 个线程并发抓取...")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        for symbol, symbol_info in valid_symbols.items():
+            futures.append(
+                executor.submit(
+                    process_symbol, 
                     symbol, 
-                    interval='15m', 
-                    limit=1000,
-                    startTime=start_time,
-                    endTime=end_time
+                    symbol_info, 
+                    start_ts, 
+                    current_ts, 
+                    interval, 
+                    interval_ms, 
+                    collection_name
                 )
-                
-                # 兼容空返回（DataFrame或None）
-                if kline_data is None or (isinstance(kline_data, pd.DataFrame) and kline_data.empty):
-                    print(f"⚠️ {symbol} 批次 {batch+1}/5 没有获取到K线数据，跳过后续批次")
-                    break
-                
-                # 累积DataFrame
-                if isinstance(kline_data, pd.DataFrame):
-                    all_symbol_klines.append(kline_data)
-                else:
-                    # 兜底：若返回为列表，则转换为DataFrame
-                    all_symbol_klines.append(pd.DataFrame(kline_data))
-                
-                print(f"📊 {symbol} 批次 {batch+1}/5 获取到 {len(kline_data)} 根K线")
-                
-                # 如果获取的数据少于1000条，说明已经没有更多数据了
-                if len(kline_data) < 999:
-                    print(f"⚠️ {symbol} 批次 {batch+1}/5 获取到的K线数据少于1000条，跳过后续批次")
-                    break
-                
-                # 每次请求后休息一下，避免API限制
-                time.sleep(0.2)
-                
+            )
+        
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                count = future.result()
+                total_klines_count += count
             except Exception as e:
-                print(f"获取 {symbol} 批次 {batch+1}/5 K线数据失败: {e}")
-                # 出错后休息一下再继续
-                time.sleep(1)
-                continue
-        
-        # 处理获取到的所有K线数据
-        if all_symbol_klines:
-            # 合并并按时间戳排序（从旧到新）
-            df = pd.concat(all_symbol_klines, ignore_index=True)
-            if 'timestamp' in df.columns:
-                df = df.sort_values('timestamp')
-            
-            # 保存到MongoDB
-            mongo_utils.insert_data('symbol_15min_kline', df)
-            
-            total_klines_count += len(df)
-            print(f"✅ 成功获取并保存 {symbol} 的 {len(df)} 条15分钟K线数据")
-        
-        # 每处理10个币种休息一下，避免API限制
-        if i % 10 == 0:
-            print(f"已处理 {i} 个币种，休息3秒...")
-            time.sleep(3)
-    
-    print(f"总共收集 {total_klines_count} 条15分钟K线数据")
-    print("=== 15分钟K线数据收集完成 ===", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+                print(f"线程执行异常: {e}")
 
+    print(f"=== {interval} 数据收集完成，总计新增 {total_klines_count} 条 ===", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 if __name__ == "__main__":
-    collect_15min_kline_data()
+    collect_kline_data(start_date_str='2025-01-01', interval='1h', max_workers=1)

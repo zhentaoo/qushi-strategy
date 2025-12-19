@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 # MongoDB数据库配置
 MONGO_HOST = 'localhost'
 MONGO_PORT = 27017
-MONGO_DATABASE = 'bian'
+MONGO_DATABASE = 'bian_1h'
 MONGO_USER = 'admin'
 MONGO_PASSWORD = 'wwwxxxdskjkl123990'  # 替换成实际密码
 

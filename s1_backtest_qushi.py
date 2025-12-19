@@ -132,12 +132,13 @@ def main():
 
     # 1. 从MongoDB获取15分钟K线数据
     start_time = time.time()
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-07-01', '2025-08-01')
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-08-01', '2025-09-01')
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-09-01', '2025-09-10')
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-10-01', '2025-11-01') # 48.57%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-11-01', '2025-12-01') # -15.76%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-11-01', '2025-12-01') # -15.76%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-07-01', '2025-08-01') # 71%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-08-01', '2025-09-01') # 35.60%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-09-01', '2025-10-01') # 114%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-10-01', '2025-11-01') # 329.67%
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-11-01', '2025-12-01') # 137.33%
+    
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-07-01', '2025-12-01') # 677.67%
     
     # 计算因子数据
     print('开始计算指标')
@@ -217,17 +218,12 @@ def main():
         # 平仓信号：有持仓的时候，计算当前持仓的盈亏（当前k就可以平仓，因为）
         if current_position is not None:
             # print('当前有持仓, 计算平仓信号')
-            current_symbol_row_df = current_data[current_data['symbol'] == current_position['symbol']]
-            current_symbol_row = current_symbol_row_df.iloc[0]
+            current_symbol_row = current_data[current_data['symbol'] == current_position['symbol']].iloc[0]
             
-            # 更新最高价，用来做平仓信号判断
-            current_high = float(current_symbol_row['high'])
-            if current_high > current_position['highest_price']:
-                current_position['highest_price'] = current_high
-
-            # 2. 计算平仓信号 (包含 固定5%止损 和 ATR动态止盈)
+            # 计算平仓信号 (包含 固定5%止损 和 ATR动态止盈)
             close_signal = generate_close_signal(current_position, current_symbol_row)
             
+            # 出现平仓信号
             if close_signal is not None:
                 print(f"平仓信号: {close_signal['date_str']} 原因: {close_signal.get('reason', 'signal')}")
                 
@@ -275,8 +271,14 @@ def main():
                 if cash_balance < 100.0:
                     print(f"资金低于 100 USDT，停止后续交易")
                     break
+                
+                continue
 
-    
+            
+            # 没有平仓信号，更新最高价
+            if float(current_symbol_row['high']) > current_position['highest_price']:
+                current_position['highest_price'] = float(current_symbol_row['high'])
+
     # 6. 保存结果到MongoDB
     trade_records = pd.DataFrame(trade_records_list)
 

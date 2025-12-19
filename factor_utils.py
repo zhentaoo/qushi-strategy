@@ -32,6 +32,10 @@ def compute_single_symbol_factor(g: pd.DataFrame):
     for n in [1, 4, 16, 32, 64, 96]:
         g[f'roc_{n}'] = (g['close'].pct_change(n) * 100)
 
+    # ========= Donchian Channel =========
+    g['high_64'] = g['high'].rolling(window=64, min_periods=64).max().shift(1)
+    g['low_64'] = g['low'].rolling(window=64, min_periods=64).min().shift(1)
+
     # ========= MA =========
     for n in [3, 5, 10, 15, 20, 30]:
         g[f'ma{n}'] = ta.sma(g['close'], length=n).shift(1)
@@ -44,15 +48,6 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         g[f'volume_ma_{n}'] = g['volume'].rolling(n, min_periods=n).mean().shift(1)
         g[f'volume_ratio_{n}'] = g['volume'] / g[f'volume_ma_{n}']
 
-    # ========= Donchian Channel =========
-    g['donchian_upper'] = g['high'].rolling(window=20, min_periods=20).max().shift(1)
-    g['donchian_upper_pre1'] = g['high'].rolling(window=20, min_periods=20).max().shift(2)
-    g['donchian_upper_pre2'] = g['high'].rolling(window=20, min_periods=20).max().shift(3)
-    g['donchian_lower'] = g['low'].rolling(window=20, min_periods=20).min().shift(1)
-    g['donchian_lower_pre1'] = g['low'].rolling(window=20, min_periods=20).min().shift(2)
-    g['donchian_lower_pre2'] = g['low'].rolling(window=20, min_periods=20).min().shift(3)
-
-    g['donchian_mid'] = (g['donchian_upper'] + g['donchian_lower']) / 2
 
     # ========= Bollinger =========
     bb = ta.bbands(g['close'], length=20, std=2)
