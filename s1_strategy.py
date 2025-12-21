@@ -12,68 +12,6 @@ from zoneinfo import ZoneInfo
 # 2. 平仓信号直接根据当前数据的涨跌给定的
 # 也就是说，开仓动作是延迟的，平仓动作是即时的
 
-def generate_open_signal(current_data, top_n=30):
-
-    valid_data = current_data.dropna(subset=['roc_64'])
-    if valid_data.empty:
-        return None
-
-    # 按强度排序（不是只看涨幅）
-    valid_data["score"] = (
-        valid_data["roc_64"] * 0.4 + 
-        valid_data["volume_ratio_10"] * 0.3 +
-        valid_data["adx"] * 0.3
-    )
-
-    top_df = valid_data.nlargest(top_n, 'score')
-
-    # 情绪（市场季节）弱化简单阈值问题
-    pos_ratio = (top_df["roc_64"] > 0).sum() / len(top_df)
-
-    if pos_ratio > 0.70:
-        season = "summer"
-    else:
-        season = "winter"
-
-    if season != "summer":
-        return None  # 只顺势做多
-
-    filtered_df = top_df[
-        (top_df["close"] > top_df["ma5"]) &
-        (top_df["ma5"] > top_df["ma20"]) &
-        ((top_df["ma5"] - top_df["ma20"]) / top_df["ma20"] > 0.005) &    # ma斜率强度确认
-        (top_df["adx"] > 25) &
-        (top_df["plus_di"] > top_df["minus_di"]) &
-        (top_df["volume_ratio_10"] > 1.6) &  # 量能确认
-        (top_df["atr"] / top_df["close"] < 0.06)  # 波动率过滤，过滤过于尖峰币
-    ].copy()
-
-    if filtered_df.empty:
-        return None
-
-    best = filtered_df.sort_values(by='score', ascending=False).iloc[0]
-
-    signal = {
-        "symbol": best["symbol"],
-        "timestamp": int(best["timestamp"]),
-        "date_str": datetime.fromtimestamp(
-            int(best["timestamp"])/1000, 
-            tz=ZoneInfo('Asia/Shanghai')
-        ).strftime('%Y-%m-%d %H:%M:%S'),
-        "side": "BUY",
-        "price": float(best["close"]),
-        "volume_ratio_10": float(best["volume_ratio_10"]),
-        "roc_64": float(best["roc_64"]),
-        "adx": float(best["adx"]),
-        "market_season": season,
-        "score": float(best["score"])
-    }
-
-    print(f"✔ BUY SIGNAL: {signal['symbol']} | score={signal['score']:.2f}")
-
-    return signal
-
-
 # 给定当前时间切片的数据，计算开仓信号
 def generate_open_signal(current_data, top_n = 30):
     """

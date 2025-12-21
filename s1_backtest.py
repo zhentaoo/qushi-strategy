@@ -172,8 +172,11 @@ def main():
         window_time = time_windows[idx]
         next_window_time = time_windows[idx + 1]
 
-        current_data = processed_df[processed_df['timestamp'] == window_time]
-        next_data = processed_df[processed_df['timestamp'] == next_window_time]
+        # 当前时间片所有数据
+        current_timestamp_data = processed_df[processed_df['timestamp'] == window_time]
+        
+        # 下一时间片所有数据
+        next_timestamp_data = processed_df[processed_df['timestamp'] == next_window_time]
 
         # 当前时间窗口，所有币对的 指标/因子数据
         print(window_time)
@@ -185,7 +188,7 @@ def main():
         if current_position is None:
             print('当前无持仓, 计算开仓信号')
 
-            signal = generate_open_signal(current_data)
+            signal = generate_open_signal(current_timestamp_data)
             
             if signal is None:
                 print('无开仓信号')
@@ -198,8 +201,9 @@ def main():
             if cash_balance < margin:
                 print(f"资金不足 ({cash_balance:.2f} USDT)<{margin}，跳过开仓")
                 continue
-
-            entry_row = next_data[next_data['symbol'] == signal['symbol']]
+            
+            current_row = current_timestamp_data[current_timestamp_data['symbol'] == signal['symbol']]
+            entry_row = next_timestamp_data[next_timestamp_data['symbol'] == signal['symbol']]
             if entry_row.empty:
                 print(f"警告: 无法获取 {signal['symbol']} 在下一时刻 {datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ)} 的数据，跳过开仓")
                 continue
@@ -217,7 +221,8 @@ def main():
                 'entry_price': entry_price,
                 'highest_price': entry_price,
                 'quantity': quantity,
-                'atr': float(entry_row.iloc[0]['atr']),
+                'atr': float(current_row.iloc[0]['atr']),
+                'atr_stop_price': entry_price - 0.7 * float(current_row.iloc[0]['atr']),
                 'margin': margin,
                 'leverage': leverage,
             }
@@ -227,7 +232,7 @@ def main():
         # 平仓信号：有持仓的时候，计算当前持仓的盈亏（当前k就可以平仓，因为）
         if current_position is not None:
             # print('当前有持仓, 计算平仓信号')
-            current_symbol_row = current_data[current_data['symbol'] == current_position['symbol']].iloc[0]
+            current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == current_position['symbol']].iloc[0]
             
             # 计算平仓信号
             close_signal = generate_close_signal(current_position, current_symbol_row)
@@ -263,6 +268,8 @@ def main():
                     
                     'entry_price': entry_price,
                     'exit_price': exit_price,
+                    'atr': current_position['atr'],
+                    'atr_stop_price': current_position['atr_stop_price'],
                     'profit': profit,
                     'profit_pct': profit_pct,
                     'adverse_move_pct': 0.0, 
