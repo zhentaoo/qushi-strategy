@@ -17,11 +17,15 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         return g
 
     g = g.sort_values('timestamp').copy()
+    
+    g['taker_sell_amount'] = g['amount'] - g['taker_buy_amount']
 
     # ========= delta ratio（安全处理） =========
     eps = 1e-8
-    g['delta_buy_ratio'] = g['taker_buy_amount'] / (g['taker_sell_amount'] + eps)
-    g['delta_sell_ratio'] = g['taker_sell_amount'] / (g['taker_buy_amount'] + eps)
+    # 修复：确保分母非零，使用 np.maximum 避免除以零或非常小的数
+    g['delta_buy_ratio'] = g['taker_buy_amount'] / np.maximum(g['taker_sell_amount'], eps)
+    g['delta_sell_ratio'] = g['taker_sell_amount'] / np.maximum(g['taker_buy_amount'], eps)
+
 
     # ========= price shift =========
     for n in [1, 2, 3]:
@@ -44,7 +48,7 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         g[f'ma{n}_pre3'] = g[f'ma{n}'].shift(4)
 
     # ========= volume MA & ratio =========
-    for n in [5, 10, 20, 60, 96]:
+    for n in [3, 5, 10, 20, 60, 96]:
         g[f'volume_ma_{n}'] = g['volume'].rolling(n, min_periods=n).mean().shift(1)
         g[f'volume_ratio_{n}'] = g['volume'] / g[f'volume_ma_{n}']
 

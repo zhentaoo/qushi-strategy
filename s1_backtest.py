@@ -18,12 +18,12 @@ CHINA_TZ = pytz.timezone('Asia/Shanghai')
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
 plt.rcParams['axes.unicode_minus'] = False
 
-interval = '15m'  # 改为15分钟K线
+interval = '1h'  # 改为1h K线
 
 # 生成时间窗口
-def get_time_windows(df, window_min=15):
+def get_time_windows(df, window_min=60):
     """
-    生成时间窗口，每15分钟一个窗口
+    生成时间窗口，每60分钟一个窗口
     """
     if df.empty:
         return []
@@ -34,8 +34,8 @@ def get_time_windows(df, window_min=15):
     print(f"数据时间范围: {min_time} 到 {max_time}")
     
     
-    # 生成4小时间隔的时间窗口
-    window_ms = window_min * 60 * 1000  # 15分钟的毫秒数
+    # 生成时间窗口
+    window_ms = window_min * 60 * 1000  # 60分钟的毫秒数
     
     windows = []
     current_time = min_time
@@ -129,10 +129,19 @@ def main():
     mongo_utils.delete_data('trade_records')
     mongo_utils.delete_data('factor_processed_kline')
 
+    # exclude = [
+    #     'BTCUSDT','ETHUSDT','BNBUSDT',
+    #     'USDTUSDT','BUSDUSDT','USDCUSDT'
+    #     'TUSDUSDT','WBTCUSDT','WETHUSDT'
+    # ]
 
-    # 1. 从MongoDB获取15分钟K线数据
+    # 1. 从MongoDB获取1h K线数据
     start_time = time.time()
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-10-01', '2025-12-01') # 137.33%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-12-01')
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 125.43%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # 568.93%
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') 
     
     # 计算因子数据
     print('开始计算指标')
@@ -141,11 +150,11 @@ def main():
 
     elapsed = time.time() - start_time
     print(f"K线数据长度: {len(kline_df)}")
-    print(f"读取15分钟K线数据耗时: {elapsed:.2f}秒")
+    print(f"读取1h K线数据耗时: {elapsed:.2f}秒")
 
 
     # 2. 生成时间窗口
-    time_windows = get_time_windows(processed_df, window_min=15)
+    time_windows = get_time_windows(processed_df)
     print(time_windows) 
     print(len(time_windows))
 
@@ -182,14 +191,19 @@ def main():
                 print('无开仓信号')
                 continue
 
-            margin = 200
-            leverage = 5
+            # margin = 200
+            margin = cash_balance * 0.5
+            leverage = 2
 
             if cash_balance < margin:
                 print(f"资金不足 ({cash_balance:.2f} USDT)<{margin}，跳过开仓")
                 continue
 
             entry_row = next_data[next_data['symbol'] == signal['symbol']]
+            if entry_row.empty:
+                print(f"警告: 无法获取 {signal['symbol']} 在下一时刻 {datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ)} 的数据，跳过开仓")
+                continue
+                
             entry_price = float(entry_row.iloc[0]['open'])
             quantity = (margin * leverage) / entry_price
 
@@ -203,6 +217,7 @@ def main():
                 'entry_price': entry_price,
                 'highest_price': entry_price,
                 'quantity': quantity,
+                'atr': float(entry_row.iloc[0]['atr']),
                 'margin': margin,
                 'leverage': leverage,
             }
@@ -214,7 +229,7 @@ def main():
             # print('当前有持仓, 计算平仓信号')
             current_symbol_row = current_data[current_data['symbol'] == current_position['symbol']].iloc[0]
             
-            # 计算平仓信号 (包含 固定5%止损 和 ATR动态止盈)
+            # 计算平仓信号
             close_signal = generate_close_signal(current_position, current_symbol_row)
             
             # 出现平仓信号
@@ -230,7 +245,9 @@ def main():
                 margin = float(current_position.get('margin', 100.0))
                 leverage = current_position.get('leverage', 10)
 
-                profit = qty * (exit_price - entry_price)
+                entry_fee = entry_price * qty * 0.0005
+                exit_fee = exit_price * qty * 0.0005
+                profit = qty * (exit_price - entry_price) - entry_fee - exit_fee
                 profit_pct = (profit / (margin * leverage) * 100.0) if margin != 0 else 0.0
                 cash_balance = cash_balance + profit
 
@@ -252,6 +269,7 @@ def main():
                     'quantity': qty,
                     'final_balance': cash_balance,
                     'side': current_position['side'],
+
 
                     'margin': margin,
                     'leverage': leverage,

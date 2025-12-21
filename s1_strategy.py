@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+from re import search
 import pandas as pd
 from datetime import datetime
 import mongo_utils
@@ -84,17 +85,14 @@ def generate_open_signal(current_data, top_n = 30):
     if valid_data.empty:
         return None
 
-    # 降序排序，取前N个
+
     top_df = valid_data.nlargest(top_n, 'roc_64')
     pos_cnt = (top_df['roc_64'] > 0).sum()
     ratio = pos_cnt / top_n
 
     filtered_df = pd.DataFrame()
+    season = 'summer'
 
-    if ratio > 0.95:
-        season = 'summer'
-    else:
-        season = 'winter'
 
     side = None
 
@@ -106,7 +104,8 @@ def generate_open_signal(current_data, top_n = 30):
             & (top_df['close_pre2'] > top_df['ma5_pre2'])
             & (top_df['close_pre3'] > top_df['ma5_pre3'])
             & (top_df['ma5'] > top_df['ma20'])
-            & (top_df['volume'] > top_df['volume_ma_10'] * 2.5) #必要条件，否则胜率和收益率大幅下降
+            & (top_df['volume'] > top_df['volume_ma_10'] * 2) #必要条件，否则胜率和收益率大幅下降
+            & (top_df['volume'] < top_df['volume_ma_10'] * 7) #必要条件，否则胜率和收益率大幅下降
             & (top_df['adx'] > 45) # 329.67%
         ].copy()
         side = 'BUY'
@@ -152,7 +151,17 @@ def generate_close_signal(current_position, current_symbol_data):
     atr = float(current_symbol_data.get('atr', 0))    
 
     # ATR动态止盈退出
-    atr_stop_price = highest_price - (1.1 * atr)
+    # atr_stop_price = highest_price - (1.5 * atr) # 亏损 归零
+    # atr_stop_price = highest_price - (1.1 * atr) # 赢利 
+    # atr_stop_price = highest_price - 1 * atr # 胜率39%，盈利700%
+    # atr_stop_price = highest_price - 0.9 * atr # 胜率39.61%，盈利735.07%
+    # atr_stop_price = highest_price - 0.8 * atr # 胜率39.35，盈利835.54%
+    atr_stop_price = highest_price - 0.7 * atr # 胜率39.27%， 盈利976.82%（总收益率: 872.43%）
+    # atr_stop_price = highest_price - 0.6 * atr # 胜率37.79%，盈利877.65%
+    # atr_stop_price = highest_price - 0.5 * atr # 胜率33%，盈利726%
+    # atr_stop_price = highest_price - 0.4 * atr # 胜率24.43%，归零
+    # atr_stop_price = highest_price - 0.3 * atr # 胜率20.97%，617.30%
+    # atr_stop_price = highest_price - 0.2 * atr # 胜率12.96，盈利307.81%
 
     # ATR动态止盈 
     if low_price < atr_stop_price:
