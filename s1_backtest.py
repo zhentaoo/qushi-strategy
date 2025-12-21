@@ -132,13 +132,7 @@ def main():
 
     # 1. 从MongoDB获取15分钟K线数据
     start_time = time.time()
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-07-01', '2025-08-01') # 71%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-08-01', '2025-09-01') # 35.60%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-09-01', '2025-10-01') # 114%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-10-01', '2025-11-01') # 329.67%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-11-01', '2025-12-01') # 137.33%
-    
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_15min_kline', '2025-07-01', '2025-12-01') # 677.67%
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-10-01', '2025-12-01') # 137.33%
     
     # 计算因子数据
     print('开始计算指标')
