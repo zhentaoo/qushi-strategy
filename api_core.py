@@ -55,7 +55,7 @@ def get_balance():
 def get_exchange_info():
     """获取交易所信息，筛选出有效的USDT交易对"""
     try:
-        url = "https://fapi.binance.com/fapi/v1/exchangeInfo"
+        url = "https://www.binance.com/fapi/v1/exchangeInfo?showall=true"
         ex_resp = requests.get(url)
         ex_resp.raise_for_status()
         exchange_info = ex_resp.json()
@@ -68,7 +68,7 @@ def get_exchange_info():
 def get_ticker_24hr():
     """获取24小时行情数据"""
     try:
-        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        url = "https://www.binance.com/fapi/v1/ticker/24hr"
         response = requests.get(url)
         response.raise_for_status()
         ticker_data = response.json()

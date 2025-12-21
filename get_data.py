@@ -1,108 +1,283 @@
-import os
-import ssl
-import certifi
-import datetime
-# 设置 SSL 证书环境变量，确保在多进程（spawn）模式下也能生效
-os.environ['SSL_CERT_FILE'] = certifi.where()
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 
-from binance_historical_data import BinanceDataDumper
+import requests
 import pandas as pd
-import urllib.request
+import zipfile
+import io
+import time
+import os
+from datetime import datetime
+from dateutil.relativedelta import relativedelta
+from zoneinfo import ZoneInfo
+import api_core
+import mongo_utils
+from concurrent.futures import ThreadPoolExecutor
 
-# ---------- SSL 设置（macOS 兼容） ----------
-# 这个 patch 只对当前进程有效，对于 mpire spawn 的子进程，依赖上面的环境变量
-ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
-
-def check_connectivity():
-    """检查与 Binance 数据源的连接"""
-    url = "https://data.binance.vision"
-    print(f"---> Testing connectivity to {url}...")
-    try:
-        urllib.request.urlopen(url, timeout=10)
-        print("---> Connection successful!")
-        return True
-    except Exception as e:
-        print(f"---> Connection failed: {e}")
-        print("---> 建议：如果您在中国大陆，请开启全局代理或设置终端代理。")
-        print("---> 例如：export https_proxy=http://127.0.0.1:7890")
-        return False
-
-def main():
-    # ---------- 检查网络 ----------
-    if not check_connectivity():
-        print("⚠️ 网络连接测试失败，脚本可能会报错。")
-        # 不强制退出，尝试继续
-
-    # ---------- 配置 ----------
-    SAVE_DIR = "."
-    os.makedirs(SAVE_DIR, exist_ok=True)
-
-    # 时间范围：最近一年
-    end_date = datetime.date.today()
-    start_date = end_date - datetime.timedelta(days=365)
-
-    # ---------- 初始化 Dumper ----------
-    dumper = BinanceDataDumper(
-        path_dir_where_to_dump=SAVE_DIR,
-        asset_class="um",       # USDT 永续合约
-        data_type="klines",
-        data_frequency="1h"
-    )
-
-    # ---------- 下载历史数据 ----------
-    dumper.dump_data(
-        tickers=None,          # None = 所有 USDT 永续交易对
-        date_start=start_date,
-        date_end=end_date,
-        is_to_update_existing=False,
-        tickers_to_exclude=None,
-    )
-
-    # ---------- 合并 CSV 为 Parquet ----------
-    # 注意：这里假设 dump_data 下载的是 CSV 文件，需要确认下载后的目录结构
-    # binance_historical_data 通常会按照 asset_class/data_type/data_frequency/ticker/ 这样的结构存储
-    # 下面的代码可能需要根据实际下载结构调整。
-    # 暂时先保留原逻辑，但原逻辑可能找不到文件，因为 dumper 会创建子目录。
+def get_month_range(start_ts):
+    """
+    Generate (year, month) tuples from start_ts to PREVIOUS month.
+    Binance monthly data does not include the current incomplete month.
+    If start_ts is older than 2 years, start from 2 years ago.
+    """
+    start_date = datetime.fromtimestamp(start_ts / 1000, tz=ZoneInfo('UTC'))
+    current_date = datetime.now(tz=ZoneInfo('UTC'))
     
-    # 简单的遍历查找所有 csv
-    all_files = []
-    for root, dirs, files in os.walk(SAVE_DIR):
-        for file in files:
-            if file.endswith(".csv"):
-                all_files.append(os.path.join(root, file))
+    # Calculate previous month (last complete month)
+    # If today is May 2025, we want up to April 2025.
+    # replace day=1 ensures we are comparing months correctly
+    last_complete_month = current_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0) - relativedelta(months=1)
+    
+    # 2 years ago from now
+    two_years_ago = current_date - relativedelta(years=2)
+    
+    # Use the later of the two dates (optimization: max 2 years data)
+    effective_start_date = max(start_date, two_years_ago)
+    
+    # Start from the first day of the effective start month
+    current = effective_start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    # Iterate until last_complete_month (inclusive)
+    while current <= last_complete_month:
+        yield current.year, current.month
+        current += relativedelta(months=1)
 
-    if not all_files:
-        print("未找到任何 CSV 文件。")
+def process_csv_data(df, symbol):
+    """
+    Process raw CSV dataframe to match schema.
+    """
+    # 1. Check and remove header if present
+    if not df.empty:
+        first_cell = str(df.iloc[0, 0])
+        if 'open_time' in first_cell:
+            df = df.iloc[1:].copy()
+    
+    # 2. Assign raw CSV column names
+    # As per user instruction, the CSV columns are:
+    # open_time,open,high,low,close,volume,close_time,quote_volume,count,taker_buy_volume,taker_buy_quote_volume,ignore
+    df.columns = [
+        'open_time', 'open', 'high', 'low', 'close', 'volume', 
+        'close_time', 'quote_volume', 'count', 
+        'taker_buy_volume', 'taker_buy_quote_volume', 'ignore'
+    ]
+
+    # 3. Rename to match system schema (mongo_utils and api_core expectations)
+    # open_time -> timestamp
+    # quote_volume -> amount
+    # taker_buy_quote_volume -> taker_buy_amount
+    df.rename(columns={
+        'open_time': 'timestamp',
+        'quote_volume': 'amount',
+        'taker_buy_quote_volume': 'taker_buy_amount'
+    }, inplace=True)
+
+    # 4. Convert types to numeric
+    numeric_cols = [
+        'timestamp', 'open', 'high', 'low', 'close', 'volume', 
+        'close_time', 'amount', 'count', 'taker_buy_volume', 'taker_buy_amount'
+    ]
+    
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # 5. Add metadata
+    df['symbol'] = symbol
+    df['interval'] = '1h'
+    
+    # 6. Drop 'ignore' column
+    if 'ignore' in df.columns:
+        df.drop(columns=['ignore'], inplace=True)
+        
+    return df
+
+def process_task(task):
+    """
+    Worker function to process a single download task.
+    """
+    symbol = task['symbol']
+    year = task['year']
+    month = task['month']
+    url = task['url']
+    save_dir = task['save_dir']
+    zip_filename = task['zip_filename']
+    csv_filename = zip_filename.replace('.zip', '.csv')
+    month_str = f"{month:02d}"
+
+    try:
+        # Check if CSV already exists
+        local_csv_path = os.path.join(save_dir, csv_filename)
+        if os.path.exists(local_csv_path):
+            # Already exists, skipping
+            print(f"  Skipping {zip_filename} (already exists)")
+            return
+
+        print(f"  Downloading {zip_filename}...")
+        try:
+            # Add timeout to avoid hanging
+            response = requests.get(url, timeout=30)
+        except requests.exceptions.RequestException as e:
+            print(f"  Failed to download {url}: {e}")
+            return
+
+        if response.status_code == 404:
+            # File not found (common for very recent or very old months)
+            # print(f"  File not found (404): {url}")
+            return
+        
+        if response.status_code != 200:
+            print(f"  Failed to download {url}, status: {response.status_code}")
+            return
+
+        # Unzip and read CSV
+        try:
+            with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+                # Find CSV in zip
+                file_list = z.namelist()
+                target_file = None
+                for f in file_list:
+                    if f.endswith('.csv'):
+                        target_file = f
+                        break
+                
+                if not target_file:
+                    print(f"  No CSV found in zip for {zip_filename}")
+                    return
+                    
+                # Read content from zip
+                content = z.read(target_file)
+                
+                # Save CSV to local disk
+                with open(local_csv_path, 'wb') as local_f:
+                    local_f.write(content)
+                print(f"  Saved CSV to {local_csv_path}")
+                
+                # Read into DataFrame for DB insertion
+                try:
+                    df = pd.read_csv(io.BytesIO(content), header=None)
+                        
+                    if df.empty:
+                        print(f"  Empty CSV for {zip_filename}")
+                        return
+                        
+                    # Process data
+                    processed_df = process_csv_data(df, symbol)
+                    
+                    # Insert into MongoDB
+                    collection_name = 'symbol_1h_kline'
+                    
+                    try:
+                        mongo_utils.insert_data(collection_name, processed_df)
+                    except Exception as e:
+                        if "E11000" in str(e): 
+                            print(f"  Data already exists in DB for {symbol} {year}-{month_str}")
+                        else:
+                            print(f"  Error inserting data for {symbol}: {e}")
+                except Exception as e:
+                     print(f"  Error processing CSV content for {symbol}: {e}")
+
+        except zipfile.BadZipFile:
+            print(f"  Bad Zip File: {url}")
+
+    except Exception as e:
+        print(f"  Error processing task {url}: {e}")
+
+def download_and_save_data():
+    # 1. Get exchange info
+    print("Getting exchange info...")
+    exchange_info = api_core.get_exchange_info()
+    if not exchange_info:
+        print("Failed to get exchange info")
         return
 
-    dfs = []
-    for file in all_files:
-        try:
-            df = pd.read_csv(file)
-            # 尝试从文件名或路径中提取 symbol
-            # 假设文件名包含 symbol 或者路径包含 symbol
-            # binance_historical_data 默认路径结构: .../spot/monthly/klines/BTCUSDT/1h/BTCUSDT-1h-2023-01.csv
-            # 这里简单取文件名的第一部分作为 symbol，或者根据路径结构解析
-            # 更好的方式是看 binance_historical_data 的文档或源码，但这里先尝试通用做法
-            filename = os.path.basename(file)
-            symbol = filename.split('-')[0] 
-            df['symbol'] = symbol
-            dfs.append(df)
-        except Exception as e:
-            print(f"Error reading {file}: {e}")
+    symbols = exchange_info.get('symbols', [])
+    
+    usdt_pairs = [s for s in symbols if s.get('status') == 'TRADING' and s.get('quoteAsset') == 'USDT']
+    
+    
+    base_url = "https://data.binance.vision/data/futures/um/monthly/klines"
+    
+    # Directory to save CSV files
+    save_dir = 'data/csv'
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # 2. Generate tasks and download.txt
+    print("Generating download list...")
+    all_tasks = []
+    
+    for idx, symbol_info in enumerate(usdt_pairs):
+        symbol = symbol_info['symbol']
+        onboard_date = symbol_info.get('onboardDate')
+        
+        if not onboard_date:
+            print(f"Skipping {symbol}: No onboard date")
+            continue
+            
+        # Check if onboard date is older than 3 months
+        onboard_ts = onboard_date / 1000 # Convert to seconds
+        onboard_dt = datetime.fromtimestamp(onboard_ts, tz=ZoneInfo('UTC'))
+        current_dt = datetime.now(tz=ZoneInfo('UTC'))
+        
+        # 3 months ago from now
+        three_months_ago = current_dt - relativedelta(months=3)
+        
+        if onboard_dt > three_months_ago:
+            print(f"Skipping {symbol}: New listing (< 3 months), onboarded {onboard_dt.date()}")
+            continue
 
-    if dfs:
-        full_df = pd.concat(dfs, ignore_index=True)
-
-        # 保存为 parquet
-        parquet_path = os.path.join(SAVE_DIR, "futures_usdt_1h_last_year.parquet")
-        full_df.to_parquet(parquet_path, engine="pyarrow", index=False)
-
-        print(f"✅ 下载完成！合并后的 Parquet 文件：{parquet_path}")
-        print(f"总交易对数量：{len(dfs)}") # 这里其实是文件数，不完全等于交易对数
-        print(f"总数据条数：{len(full_df)}")
-    else:
-        print("没有数据被合并。")
+        # Iterate months
+        for year, month in get_month_range(onboard_date):
+            month_str = f"{month:02d}"
+            filename = f"{symbol}-1h-{year}-{month_str}.zip"
+            url = f"{base_url}/{symbol}/1h/{filename}"
+            
+            all_tasks.append({
+                'symbol': symbol,
+                'year': year,
+                'month': month,
+                'url': url,
+                'zip_filename': filename,
+                'save_dir': save_dir
+            })
+            
+    # Write download.txt
+    download_txt_path = 'download.txt'
+    try:
+        with open(download_txt_path, 'w') as f:
+            for task in all_tasks:
+                f.write(task['url'] + '\n')
+        print(f"Generated {len(all_tasks)} tasks in {download_txt_path}")
+    except Exception as e:
+        print(f"Error writing download.txt: {e}")
+    
+    # 3. Filter missing files
+    tasks_to_run = []
+    for task in all_tasks:
+        csv_filename = task['zip_filename'].replace('.zip', '.csv')
+        local_path = os.path.join(save_dir, csv_filename)
+        
+        # Check if file exists
+        if not os.path.exists(local_path):
+            tasks_to_run.append(task)
+            
+    print(f"Found {len(tasks_to_run)} files missing. Starting download...")
+    
+    if not tasks_to_run:
+        print("All files are already downloaded.")
+        return
+    
+    # 4. Multi-threaded processing
+    # Use 5 threads to be safe with rate limits
+    max_workers = 5
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        futures = [executor.submit(process_task, task) for task in tasks_to_run]
+        
+        # Wait for completion (implicitly done by context manager, but we might want progress)
+        # We can use as_completed to show progress if needed, but let's keep it simple.
+        pass
+        
+    print("All tasks completed.")
 
 if __name__ == "__main__":
-    main()
+    download_and_save_data()
