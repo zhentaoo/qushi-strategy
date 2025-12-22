@@ -141,7 +141,7 @@ def main():
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 125.43%
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # 568.93%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') 
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-25', '2025-12-01') 
     
     # 计算因子数据
     print('开始计算指标')
@@ -167,34 +167,35 @@ def main():
     print(f"开始回测，初始资金: {cash_balance_start} USDT")
     print(f"时间窗口数量: {len(time_windows)}")
     
-    # 4 回测循环
+    # 4. 回测大时间循环
     for idx in range(100, len(time_windows) - 1):
-        window_time = time_windows[idx]
-        next_window_time = time_windows[idx + 1]
-
-        # 当前时间片所有数据
-        current_timestamp_data = processed_df[processed_df['timestamp'] == window_time]
+        # 当前时间切面，所有币对数据
+        current_window_time = time_windows[idx]
+        current_timestamp_data = processed_df[processed_df['timestamp'] == current_window_time]
         
-        # 下一时间片所有数据
+        # 下一时间切面，所有币对数据
+        next_window_time = time_windows[idx + 1]
         next_timestamp_data = processed_df[processed_df['timestamp'] == next_window_time]
 
         # 当前时间窗口，所有币对的 指标/因子数据
-        print(window_time)
+        print(current_window_time)
         print(f"\n=== 时间窗口 {idx}/{len(time_windows)-1} ===")
-        print(f"当前时间: {datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"当前时间: {datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"当前账户余额: {cash_balance:.2f} USDT")
 
-        # 开仓信号：没有持仓的时候进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
+        # 没有持仓：开仓信号计算，进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
         if current_position is None:
             print('当前无持仓, 计算开仓信号')
 
+            # 计算开仓信号
             signal = generate_open_signal(current_timestamp_data)
             
+            # 没信号就退出
             if signal is None:
                 print('无开仓信号')
                 continue
 
-            # margin = 200
+            # 下单仓位，指数下单
             margin = cash_balance * 0.5
             leverage = 2
 
@@ -202,42 +203,45 @@ def main():
                 print(f"资金不足 ({cash_balance:.2f} USDT)<{margin}，跳过开仓")
                 continue
             
-            current_row = current_timestamp_data[current_timestamp_data['symbol'] == signal['symbol']]
-            entry_row = next_timestamp_data[next_timestamp_data['symbol'] == signal['symbol']]
-            if entry_row.empty:
+            # 记录开仓信息
+            current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == signal['symbol']]
+            next_symbol_row = next_timestamp_data[next_timestamp_data['symbol'] == signal['symbol']]
+            
+            if next_symbol_row.empty:
                 print(f"警告: 无法获取 {signal['symbol']} 在下一时刻 {datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ)} 的数据，跳过开仓")
                 continue
                 
-            entry_price = float(entry_row.iloc[0]['open'])
+            entry_price = float(next_symbol_row.iloc[0]['open'])
             quantity = (margin * leverage) / entry_price
 
             current_position = {
                 'symbol': signal['symbol'],
                 'side': 'BUY',
-                'sign_open_time': window_time,
-                'sign_open_time_str': datetime.fromtimestamp(window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
+                'sign_open_time': current_window_time,
+                'sign_open_time_str': datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                 'trade_open_time': next_window_time,
                 'trade_open_time_str': datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                 'entry_price': entry_price,
                 'highest_price': entry_price,
                 'quantity': quantity,
-                'atr': float(current_row.iloc[0]['atr']),
-                'atr_stop_price': entry_price - 0.7 * float(current_row.iloc[0]['atr']),
+                'atr': float(current_symbol_row.iloc[0]['atr']),
+                'atr_stop_price': entry_price - 0.7 * float(current_symbol_row.iloc[0]['atr']),
                 'margin': margin,
                 'leverage': leverage,
             }
             print(f"开仓: {current_position['symbol']} 做多 价格: {entry_price:.6f} 数量: {quantity:.6f}")
-            continue
+            print(current_position)
+
         
-        # 平仓信号：有持仓的时候，计算当前持仓的盈亏（当前k就可以平仓，因为）
-        if current_position is not None:
-            # print('当前有持仓, 计算平仓信号')
+        # 有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为）
+        else:
+            # 当前信号数据
             current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == current_position['symbol']].iloc[0]
             
             # 计算平仓信号
             close_signal = generate_close_signal(current_position, current_symbol_row)
             
-            # 出现平仓信号
+            # 出现平仓信号，说明本次交易已经结束
             if close_signal is not None:
                 print(f"平仓信号: {close_signal['date_str']} 原因: {close_signal.get('reason', 'signal')}")
                 
@@ -293,10 +297,11 @@ def main():
                 
                 continue
 
-            
             # 没有平仓信号，更新最高价
             if float(current_symbol_row['high']) > current_position['highest_price']:
                 current_position['highest_price'] = float(current_symbol_row['high'])
+
+        # print(current_position)
 
     # 6. 保存结果到MongoDB
     trade_records = pd.DataFrame(trade_records_list)

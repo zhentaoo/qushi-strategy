@@ -83,10 +83,18 @@ def generate_close_signal(current_position, current_symbol_data):
     if current_position is None or current_symbol_data is None:
         return None
 
-    low_price = float(current_symbol_data['low'])
     highest_price = float(current_position.get('highest_price'))
-    close_price = float(current_symbol_data['close'])
+    low_price = float(current_symbol_data['low'])
     atr = float(current_symbol_data.get('atr', 0))    
+    
+    print('****')
+    print(f"当前持仓: {current_position}")
+    print(f"当前最高价: {highest_price}")
+    print(f"当前最低价: {low_price}")
+    print(f"当前ATR: {atr}")
+    print(f"当前ATR止损价格: {highest_price - (0.7 * atr)}")
+
+    print('****')
 
     # ATR动态止盈退出
     # atr_stop_price = highest_price - (1.5 * atr) # 亏损 归零
