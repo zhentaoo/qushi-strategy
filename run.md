@@ -1,6 +1,7 @@
 # 查看日志
 tail -f nohup.out
 tail -f runtime.log
+tail -f s1_runtime.log
 
 
 <!-- 刷新 crontab 任务 -->

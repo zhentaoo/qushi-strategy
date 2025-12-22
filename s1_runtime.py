@@ -21,7 +21,7 @@ from s1_strategy import generate_open_signal
 
 # 配置
 COLLECTION_NAME = 'runtime_symbol_factor_1h_kline'
-LEVERAGE = 2         # 杠杆倍数
+LEVERAGE = 1         # 杠杆倍数
 # ORDER_AMOUNT_USDT = 7  # 单笔下单金额
 ORDER_AMOUNT_USDT = 3000  # 单笔下单金额
 
@@ -82,7 +82,10 @@ def main():
         
         # 计算下单金额
         balance_info = api_core.get_balance()
-        available = float(balance_info.get('availableBalance', 0)) if balance_info else 0
+
+        available_balance = balance_info.get("availableBalance", 0) if balance_info else 0
+        available = float(available_balance) * 0.9
+
         usdt_amount = min(available, ORDER_AMOUNT_USDT)
         
         print(f"准备下单: {symbol}, 金额: {usdt_amount} USDT")
