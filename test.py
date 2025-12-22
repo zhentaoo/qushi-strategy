@@ -10,9 +10,11 @@ import api_core
 import mongo_utils
 
 
-end_dt = pd.to_datetime('2015 02 10 10:02:10')
-# end_dt = pd.to_datetime(1763803800000)
-end_dt = pd.to_datetime(1763803800, unit="s")
-end_dt = pd.to_datetime(1763803800000, unit="ms")
+a = None
 
-print(end_dt)
+if a is None:
+    a = 1
+    print(a)
+elif a is not None:
+    print(a)
+

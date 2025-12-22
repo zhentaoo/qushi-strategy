@@ -231,6 +231,7 @@ def main():
             }
             print(f"开仓: {current_position['symbol']} 做多 价格: {entry_price:.6f} 数量: {quantity:.6f}")
             print(current_position)
+            continue
 
         
         # 有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为）
@@ -294,12 +295,10 @@ def main():
                 if cash_balance < 100.0:
                     print(f"资金低于 100 USDT，停止后续交易")
                     break
-                
-                continue
-
-            # 没有平仓信号，更新最高价
-            if float(current_symbol_row['high']) > current_position['highest_price']:
-                current_position['highest_price'] = float(current_symbol_row['high'])
+            else:
+                # 没有平仓信号，则需要更新最高价，供下次平仓信号计算
+                if float(current_symbol_row['high']) > current_position['highest_price']:
+                    current_position['highest_price'] = float(current_symbol_row['high'])
 
         # print(current_position)
 

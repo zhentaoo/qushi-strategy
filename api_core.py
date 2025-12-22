@@ -356,13 +356,42 @@ def place_tp_sl_order(symbol, originSide, quantity, take_profit_price=None, stop
         }
         
     except Exception as e:
-        error_msg = f"下止盈止损委托失败: {str(e)}"
-        print(error_msg)
-        return {
-            'success': False,
-            'error': error_msg,
-            'symbol': symbol
-        }
+        print(f"下止盈止损单失败: {e}")
+        return None
+
+def place_trailing_stop_order(symbol, position_side, quantity, callback_rate):
+    """
+    下移动止盈/止损单 (TRAILING_STOP_MARKET)
+    :param symbol: 交易对
+    :param position_side: 持仓方向 ('BUY' or 'SELL')
+    :param quantity: 数量
+    :param callback_rate: 回调比例 (0.1% - 5.0%)
+    """
+    print(f"=== 下移动止损单 {symbol} ===")
+    
+    # 确定下单方向 (平仓)
+    side = 'SELL' if position_side == 'BUY' else 'BUY'
+    
+    # 限制 callback_rate 范围 [0.1, 5.0]
+    # callbackRate in Binance API is passed as percentage, e.g. 1.0 for 1%
+    rate = max(0.1, min(10.0, round(float(callback_rate), 1)))
+    
+    params = {
+        "symbol": symbol,
+        "side": side,
+        "type": "TRAILING_STOP_MARKET",
+        "quantity": quantity,
+        "callbackRate": rate,
+        "reduceOnly": "true"
+    }
+    
+    try:
+        res = signed_request("POST", "/fapi/v1/order", params)
+        print(f"移动止损单结果: {res}")
+        return res
+    except Exception as e:
+        print(f"下移动止损单失败: {e}")
+        return None
 
 # 清仓订单接口（市价）
 def close_position(symbol, position_amt):

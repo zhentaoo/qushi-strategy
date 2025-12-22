@@ -1,140 +1,110 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import pandas as pd
-import numpy as np
+"""
+实盘策略脚本 (1h周期)
+功能：
+1. 检查持仓：若有持仓，直接跳过 (不做任何操作)。
+2. 若无持仓：
+   - 计算开仓信号
+   - 若有信号：
+     - 市价买入
+     - 立即下移动止损单 (TRAILING_STOP_MARKET)，回调比例 0.7 * NATR
+"""
+
 import time
-from datetime import datetime, timedelta, timezone
-from zoneinfo import ZoneInfo
+import pandas as pd
+from datetime import datetime
 import api_core
 import mongo_utils
-from s1_strategy import generate_signal
+from s1_strategy import generate_open_signal
 
-# 交易参数配置
-KLINE_INTERVAL = "15m"  # K线周期（15分钟）
+# 配置
+COLLECTION_NAME = 'runtime_symbol_factor_1h_kline'
+LEVERAGE = 2         # 杠杆倍数
+ORDER_AMOUNT_USDT = 3000  # 单笔下单金额
 
-# 定时脚本初始化的时候执行，先平仓+清空委托单，后续再进行选信号，下单逻辑
-def close_all_positions_if_any():
-    """
-    若发现有持仓，先全部平仓（市价 reduceOnly）。
-    若没有持仓但存在挂单，按交易对逐个撤销全部挂单。
-    返回是否执行了平仓操作。
-    """
-    try:
-        # 1. 每次脚本执行：先撤销所有挂单，然后再获取仓位进行平仓
-        api_core.cancel_all_open_orders()
-
-        # 2. 检查并平仓所有持仓
-        active_positions = api_core.get_account_position()
-
-        print(f"发现 {len(active_positions)} 个持仓，开始依次平仓")
-        for position in active_positions:
-            symbol = position.get('symbol')
-            try:
-                position_amt = float(position.get('positionAmt', 0))
-            except Exception:
-                position_amt = 0
-            if not symbol or position_amt == 0:
-                continue
-            print(f"平仓 {symbol}: 数量 {abs(position_amt)}")
-            try:
-                close_result = api_core.close_position(symbol, position_amt)
-                print(f"平仓结果: {close_result}")
-            except Exception as e:
-                print(f"平仓 {symbol} 失败: {e}")
-        print("已完成所有持仓的平仓处理")
-        return True
-    except Exception as e:
-        print(f"检查并平仓持仓失败: {e}")
-        return False
+def get_latest_data_for_all_symbols():
+    """从数据库获取所有币对最新的1条数据"""
+    df = mongo_utils.query_recent_data_by_symbol(COLLECTION_NAME, limit_per_symbol=1)
+    if df is None or df.empty:
+        print("未获取到行情数据")
+        return None
+    return df
 
 def main():
-    print(f"=== {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  开始执行 == ")
+    print(f"=== {datetime.now()} 开始执行策略逻辑 ===")
 
-    # 1.先平掉之前的仓位：本轮开始若发现有持仓，则全部先平仓
-    close_all_positions_if_any()
-
-    # 2. 从因子集合计算交易信号（s4核心逻辑）
-    df = mongo_utils.query_recent_data_by_symbol('runtime_symbol_factor_15min_kline', limit_per_symbol=1)
-    signal = generate_signal(df, 30)
-    print(signal)
-    if signal is None:
-        print("信号计算失败或不满足条件，退出")
+    # 1. 检查持仓
+    positions = api_core.get_account_position()
+    has_position = False
+    
+    if positions:
+        # 过滤掉数量为0的
+        real_positions = [p for p in positions if float(p.get('positionAmt', 0)) != 0]
+        if real_positions:
+            has_position = True
+            for p in real_positions:
+                print(f"当前持仓: {p['symbol']}, 数量: {p['positionAmt']}")
+    
+    if has_position:
+        print("当前已有持仓，策略跳过 (不进行新开仓或止损调整)")
         return
 
-    side = signal.get('side')
-
-    # 3. 下单：根据账户可用余额动态设置下单金额与杠杆（分档规则）
-    balance_info = api_core.get_balance()
-    available = 0.0
-    try:
-        if balance_info and isinstance(balance_info, dict):
-            available = float(balance_info.get('availableBalance', 0))
-    except Exception:
-        available = 0.0
-
-    leverage = 1
-    order_usdt = min(available * leverage * 0.92, 4000)
-    order_result = api_core.place_order(signal, side, usdt_amount=order_usdt, leverage=leverage)
+    # 2. 无持仓 -> 寻找开仓信号
+    print("当前无持仓，开始寻找开仓信号...")
     
-    # 4. 止盈止损单：同步下 40% 止损平仓单（STOP_MARKET, reduceOnly）
-    stop_loss_price_ratio = 0.4
-    take_profit_price_ratio = 0.4
+    # 获取数据
+    df = get_latest_data_for_all_symbols()
+    if df is None:
+        return
 
-    symbol = signal.get('symbol')
-    latest_price = api_core.get_price(symbol)
-
-    if side == "SELL":
-        stop_loss_price = latest_price * (1 + stop_loss_price_ratio)
-        take_profit_price = latest_price * (1 - take_profit_price_ratio)
+    # 计算信号
+    signal = generate_open_signal(df)
     
-    if side == "BUY":
-        stop_loss_price = latest_price * (1 - stop_loss_price_ratio)
-        take_profit_price = latest_price * (1 + take_profit_price_ratio)
-
-    if order_result and order_result.get('success'):
-        try:
-            symbol = order_result.get('symbol')
-            # 获取最新持仓以准确读取入场价与数量
-            positions = api_core.get_account_position()
-            entry_price = None
-            position_qty = None
-            if positions:
-                for p in positions:
-                    if p.get('symbol') == symbol:
-                        try:
-                            position_qty = abs(float(p.get('positionAmt', 0)))
-                        except Exception:
-                            position_qty = None
-                        try:
-                            ep = float(p.get('entryPrice', 0))
-                            if ep > 0:
-                                entry_price = ep
-                        except Exception:
-                            entry_price = None
-                        break
-
-            # 兜底逻辑移除：严格依赖持仓信息
-            if entry_price and position_qty and position_qty > 0:
-                sl_res = api_core.place_tp_sl_order(
-                    symbol=symbol,
-                    originSide= side,
-                    quantity=position_qty,
-                    take_profit_price=take_profit_price,
-                    stop_loss_price=stop_loss_price
-                )
-                print(f"8%止损委托结果: {sl_res}")
+    if signal:
+        symbol = signal['symbol']
+        price = signal['close']
+        
+        # 获取该币的 NATR
+        # signal 中没有 natr，需要从 df 中获取
+        symbol_row = df[df['symbol'] == symbol].iloc[-1]
+        natr = float(symbol_row.get('natr', 0))
+        
+        print(f"发现开仓信号: {symbol}, 参考价: {price}, NATR: {natr}")
+        
+        # 计算下单金额
+        balance_info = api_core.get_balance()
+        available = float(balance_info.get('availableBalance', 0)) if balance_info else 0
+        usdt_amount = min(available, ORDER_AMOUNT_USDT)
+        
+        print(f"准备下单: {symbol}, 金额: {usdt_amount} USDT")
+        
+        # 1. 市价开仓
+        order_res = api_core.place_order(signal, 'BUY', usdt_amount=usdt_amount, leverage=LEVERAGE)
+        
+        if order_res and order_res.get('success'):
+            print("开仓下单成功!")
+            
+            # 获取实际成交数量 (从 order_res 返回结果中获取 quantity)
+            qty = order_res.get('quantity')
+            
+            if qty and qty > 0:
+                # 2. 下移动止损单
+                # 回调比例 = 0.7 * NATR
+                callback_rate = 0.7 * natr
+                print(f"准备下移动止损单: 数量 {qty}, 回调比例 {callback_rate:.2f}% (NATR={natr})")
+                
+                # 等待一小会儿确保仓位更新 (虽然 trailing stop 不需要仓位确认，只要 reduceOnly 即可)
+                time.sleep(1)
+                
+                api_core.place_trailing_stop_order(symbol, 'BUY', qty, callback_rate)
             else:
-                print("无法设置止损：缺少入场价或数量信息")
-        except Exception as e:
-            print(f"设置 8% 止损失败: {e}")
-
-    # 5.发送微信通知
-    api_core.send_wechat_message(signal, order_result)
-
-    print("=== 执行完成 ===")
+                print("未获取到下单数量，无法下止损单")
+        else:
+            print(f"开仓失败: {order_res.get('error') if order_res else '未知错误'}")
+    else:
+        print("没有符合条件的开仓信号")
 
 if __name__ == "__main__":
-    # 改为一次性执行脚本：直接运行主流程
-    print('run python script')
     main()
