@@ -6,13 +6,13 @@
 # 2）清理旧的 crontab 条目并重新写入新的定时规则
 # 3）日志输出到 logs/ 目录
 # 定时规则：
-# - 每小时的 00:00、15:00、30:00、45:00：执行 s4_15m_longtou_runtime.py
-# - 每小时的 59:20、14:20、29:20、44:20：执行 s_dapan.py（通过 sleep 20 实现秒级偏移）
+# - 每小时的 执行 s1_runtime_dapan.py
+# - 每小时的 执行 s1_runtime.py（通过 sleep 20 实现秒级偏移）
 
 set -e
 
 # 固定工作目录（脚本与代码所在目录）
-DIR="/data/bian-coin-strategy"
+DIR="/data/qushi-strategy"
 
 # 固定使用服务器上的 python3 路径
 PYTHON_BIN="/usr/bin/python3"
@@ -28,7 +28,7 @@ echo "[run.sh] 日志目录: $LOG_DIR"
 mkdir -p "$LOG_DIR"
 
 # 杀掉正在运行的目标脚本进程（不使用被禁的 pkill/killall）
-SCRIPTS=("s4_15m_longtou_runtime.py" "s_dapan.py")
+SCRIPTS=("s1_runtime.py" "s1_runtime_dapan.py")
 for script in "${SCRIPTS[@]}"; do
   PIDS=$(ps -ef | grep -E "[p]ython3 .*${script}" | awk '{print $2}' || true)
   if [ -n "${PIDS:-}" ]; then
@@ -49,23 +49,17 @@ echo "[run.sh] 刷新 crontab 任务"
 
 # 读取当前 crontab，并移除旧条目
 CURRENT_CRON=$(crontab -l 2>/dev/null || true)
-FILTERED_CRON=$(printf "%s\n" "$CURRENT_CRON" | grep -v -E 's0_account_clear\.py|s4_15m_longtou_runtime\.py|s_dapan\.py' || true)
+FILTERED_CRON=$(printf "%s\n" "$CURRENT_CRON" | grep -v -E 's1_runtime\.py|s1_runtime_dapan\.py' || true)
 
 # 新的 crontab 条目（变量在写入前展开）
 read -r -d '' NEW_ENTRIES <<EOF || true
 # === 交易策略任务（由 $DIR/run.sh 于 $(date) 安装） ===
 
-# 每小时 00、15、30、45 分：运行大盘脚本，拉取数据
-0  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s_dapan.py >> "$LOG_DIR/s_dapan.log" 2>&1
-15 * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s_dapan.py >> "$LOG_DIR/s_dapan.log" 2>&1
-30 * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s_dapan.py >> "$LOG_DIR/s_dapan.log" 2>&1
-45 * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s_dapan.py >> "$LOG_DIR/s_dapan.log" 2>&1
+# 每个整小时：运行大盘脚本，拉取数据
+0  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s1_runtime_dapan.py >> "$LOG_DIR/s1_runtime_dapan.py.log" 2>&1
 
-# 每小时 00、15、30、45 分：睡眠50s后，运行 s4
-1  * * * * cd "$DIR" && $PYTHON_BIN s4_15m_longtou_runtime.py >> "$LOG_DIR/s4_15m_longtou_runtime.log" 2>&1
-16 * * * * cd "$DIR" && $PYTHON_BIN s4_15m_longtou_runtime.py >> "$LOG_DIR/s4_15m_longtou_runtime.log" 2>&1
-31 * * * * cd "$DIR" && $PYTHON_BIN s4_15m_longtou_runtime.py >> "$LOG_DIR/s4_15m_longtou_runtime.log" 2>&1
-46 * * * * cd "$DIR" && $PYTHON_BIN s4_15m_longtou_runtime.py >> "$LOG_DIR/s4_15m_longtou_runtime.log" 2>&1
+# 每个整小时：运行策略脚本，执行交易
+1  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s1_runtime.py >> "$LOG_DIR/s1_runtime.log" 2>&1
 # === 结束 ===
 EOF
 
