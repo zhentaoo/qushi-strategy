@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import re
+from sqlite3.dbapi2 import Timestamp
 import pandas as pd
 import requests
 import hmac
@@ -27,7 +28,12 @@ def signed_request(method, path, params=None):
     sig = hmac.new(BINANCE_SECRET_KEY.encode(), qs.encode(), hashlib.sha256).hexdigest()
     qs += "&signature=" + sig
     headers = {"X-MBX-APIKEY": BINANCE_API_KEY}
-    return requests.request(method, BASE_URL+path, params=qs, headers=headers).json()
+    
+    if method == "POST" or method == "PUT" or method == "DELETE":
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        return requests.request(method, BASE_URL+path, data=qs, headers=headers).json()
+    else:
+        return requests.request(method, BASE_URL+path, params=qs, headers=headers).json()
 
 # 获取账户信息和持仓接口
 def get_account_position():
@@ -35,6 +41,7 @@ def get_account_position():
     try:
         positions = signed_request("GET", "/fapi/v3/positionRisk")
         active_positions = [p for p in positions if float(p.get("positionAmt", 0)) != 0]
+        print(active_positions)
         return active_positions
     except Exception as e:
         print(f"获取账户信息失败: {str(e)}")
@@ -219,7 +226,7 @@ def get_quantity(symbol, usdt_amount):
 
         quantity_precision = rule.get("quantityPrecision", 0)
         qty = round(qty, quantity_precision)
-        return qty, price_precision
+        return qty, price, price_precision
     except Exception as e:
         print(f"计算下单数量失败: {e}")
         return None, 4
@@ -234,16 +241,12 @@ def place_order(signal,side,usdt_amount = 6, leverage = 1):
 
     symbol = signal['symbol']
     set_leverage(symbol, leverage)
-
-    usdt_balance = get_balance()
-    print(f'当前USDT余额: {usdt_balance}')
     
     try:
-        qty, price_precision = get_quantity(symbol, usdt_amount)
+        qty, price, price_precision = get_quantity(symbol, usdt_amount)
         if qty is None:
             return None
         
-        price = float(signal['price'])
         print(f"准备{'做空' if side == 'SELL' else '做多'} {symbol}: 数量={qty}, 价格={price}")
         order_result = signed_request("POST", "/fapi/v1/order", {
             "symbol": symbol,
@@ -357,40 +360,6 @@ def place_tp_sl_order(symbol, originSide, quantity, take_profit_price=None, stop
         
     except Exception as e:
         print(f"下止盈止损单失败: {e}")
-        return None
-
-def place_trailing_stop_order(symbol, position_side, quantity, callback_rate):
-    """
-    下移动止盈/止损单 (TRAILING_STOP_MARKET)
-    :param symbol: 交易对
-    :param position_side: 持仓方向 ('BUY' or 'SELL')
-    :param quantity: 数量
-    :param callback_rate: 回调比例 (0.1% - 5.0%)
-    """
-    print(f"=== 下移动止损单 {symbol} ===")
-    
-    # 确定下单方向 (平仓)
-    side = 'SELL' if position_side == 'BUY' else 'BUY'
-    
-    # 限制 callback_rate 范围 [0.1, 5.0]
-    # callbackRate in Binance API is passed as percentage, e.g. 1.0 for 1%
-    rate = max(0.1, min(10.0, round(float(callback_rate), 1)))
-    
-    params = {
-        "symbol": symbol,
-        "side": side,
-        "type": "TRAILING_STOP_MARKET",
-        "quantity": quantity,
-        "callbackRate": rate,
-        "reduceOnly": "true"
-    }
-    
-    try:
-        res = signed_request("POST", "/fapi/v1/order", params)
-        print(f"移动止损单结果: {res}")
-        return res
-    except Exception as e:
-        print(f"下移动止损单失败: {e}")
         return None
 
 # 清仓订单接口（市价）
@@ -541,3 +510,82 @@ def cancel_all_open_orders():
     except Exception as e:
         print(f"撤销全部挂单失败: {e}")
         return {"success": False, "error": str(e)}
+
+
+# algo：跟踪止损止盈单
+def place_trailing_stop_order(symbol, quantity, callback_rate):
+    """
+    下移动止盈/止损单 (TRAILING_STOP_MARKET)
+    :param symbol: 交易对
+    :param position_side: 持仓方向 ('BUY' or 'SELL')
+    :param quantity: 数量
+    :param callback_rate: 回调比例 (0.1% - 5.0%)
+    """
+    print(f"=== 下移动止损单 {symbol} ===")
+    
+    
+    # 限制 callback_rate 范围 [0.1, 5.0]
+    # callbackRate in Binance API is passed as percentage, e.g. 1.0 for 1%
+    rate = max(0.1, min(10.0, round(float(callback_rate), 1)))
+    
+    params = {
+        "algoType": "CONDITIONAL",
+        "symbol": symbol,
+        "side": 'SELL',
+        "type": "TRAILING_STOP_MARKET",
+        "quantity": quantity,
+        "callbackRate": rate,
+        "reduceOnly": "true",
+    }
+    
+    try:
+        res = signed_request("POST", "/fapi/v1/algoOrder", params)
+        print(f"移动止损单结果: {res}")
+        return res
+    except Exception as e:
+        print(f"下移动止损单失败: {e}")
+        return None
+
+
+# algo 取消所有的跟踪止损单
+def cancel_all_trailing_stop_orders():
+    print(f"=== 撤销所有移动止损单 ===")
+    try:
+        # 获取该交易对所有未完成的策略挂单 (algoOpenOrders)
+        params = {"timestamp": int(time.time() * 1000)}
+        open_orders = signed_request("GET", "/fapi/v1/openAlgoOrders", params=params)
+        
+        print(f"获取 所有未完成策略挂单结果: {open_orders}")
+        if not open_orders or not isinstance(open_orders, list):
+            print(f"没有未完成挂单")
+            return []
+        
+        # # 筛选出移动止损单 (TRAILING_STOP_MARKET)
+        trailing_stops = [o for o in open_orders if o.get('orderType') == 'TRAILING_STOP_MARKET']
+        
+        if not trailing_stops:
+            print(f"没有移动止损单")
+            return []
+            
+        print(f"发现 {len(trailing_stops)} 个移动止损单，开始撤销...")
+        results = []
+        
+        for order in trailing_stops:
+            order_id = order.get('orderId')
+            symbol = order.get('symbol')
+
+            print(f"正在撤销订单 ID: {order_id}")
+            
+            # 撤销单个订单 (普通撤单接口即可撤销 trailing stop)
+            res = signed_request("DELETE", "/fapi/v1/algoOpenOrders", {
+                "symbol": symbol,
+                "orderId": order_id
+            })
+            results.append(res)
+            print(f"撤销结果: {res}")
+            
+        # return results
+        
+    except Exception as e:
+        print(f"撤销移动止损单失败: {e}")
+        return None

@@ -125,7 +125,7 @@ def compute_factors() -> str | None:
         print("MongoDB中没有runtime_symbol_1h_kline数据")
         return None
 
-    processed = factor_utils.compute_symbol_factor(df, is_runtime=False)
+    processed = factor_utils.compute_symbol_factor(df)
 
     # 将计算后，带因子的数据写入mongo，方便后续排查问题
     mongo_utils.delete_data('runtime_symbol_factor_1h_kline')
