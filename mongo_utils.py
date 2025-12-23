@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 MONGO_HOST = 'localhost'
 MONGO_PORT = 27017
 MONGO_DATABASE = 'bian_1h'
+# MONGO_DATABASE = 'bian_1h_daily'
 MONGO_USER = 'admin'
 MONGO_PASSWORD = 'wwwxxxdskjkl123990'  # 替换成实际密码
 

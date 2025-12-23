@@ -42,6 +42,11 @@ def compute_single_symbol_factor(g: pd.DataFrame):
 
     # ========= MA =========
     for n in [3, 5, 10, 15, 20, 30]:
+        # g[f'ma{n}'] = ta.sma(g['close'], length=n)
+        # g[f'ma{n}_pre1'] = g[f'ma{n}'].shift(1)
+        # g[f'ma{n}_pre2'] = g[f'ma{n}'].shift(2)
+        # g[f'ma{n}_pre3'] = g[f'ma{n}'].shift(3)
+
         g[f'ma{n}'] = ta.sma(g['close'], length=n).shift(1)
         g[f'ma{n}_pre1'] = g[f'ma{n}'].shift(2)
         g[f'ma{n}_pre2'] = g[f'ma{n}'].shift(3)

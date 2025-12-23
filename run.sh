@@ -28,7 +28,7 @@ echo "[run.sh] 日志目录: $LOG_DIR"
 mkdir -p "$LOG_DIR"
 
 # 杀掉正在运行的目标脚本进程（不使用被禁的 pkill/killall）
-SCRIPTS=("s1_runtime.py" "s1_runtime_dapan.py")
+SCRIPTS=("s1_runtime_open.py" "s1_runtime_dapan.py" "s1_runtime_close.py")
 for script in "${SCRIPTS[@]}"; do
   PIDS=$(ps -ef | grep -E "[p]ython3 .*${script}" | awk '{print $2}' || true)
   if [ -n "${PIDS:-}" ]; then
@@ -49,17 +49,20 @@ echo "[run.sh] 刷新 crontab 任务"
 
 # 读取当前 crontab，并移除旧条目
 CURRENT_CRON=$(crontab -l 2>/dev/null || true)
-FILTERED_CRON=$(printf "%s\n" "$CURRENT_CRON" | grep -v -E 's1_runtime\.py|s1_runtime_dapan\.py' || true)
+FILTERED_CRON=$(printf "%s\n" "$CURRENT_CRON" | grep -v -E 's1_runtime\.py|s1_runtime_dapan\.py|s1_guard\.py' || true)
 
 # 新的 crontab 条目（变量在写入前展开）
 read -r -d '' NEW_ENTRIES <<EOF || true
 # === 交易策略任务（由 $DIR/run.sh 于 $(date) 安装） ===
 
 # 每个整小时：运行大盘脚本，拉取数据
-0  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s1_runtime_dapan.py >> "$LOG_DIR/s1_runtime_dapan.py.log" 2>&1
+0  * * * * sleep 5 && cd "$DIR" && $PYTHON_BIN s1_runtime_dapan.py >> "$LOG_DIR/s1_runtime_dapan.py.log" 2>&1
 
 # 每个整小时：运行策略脚本，执行交易
-1  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s1_runtime.py >> "$LOG_DIR/s1_runtime.log" 2>&1
+1  * * * * cd "$DIR" && $PYTHON_BIN s1_runtime_open.py >> "$LOG_DIR/s1_runtime_open.log" 2>&1
+
+# 每分钟：运行止损守护脚本
+*  * * * * cd "$DIR" && $PYTHON_BIN s1_runtime_close.py >> "$LOG_DIR/s1_runtime_close.log" 2>&1
 # === 结束 ===
 EOF
 

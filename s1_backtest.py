@@ -140,8 +140,9 @@ def main():
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-12-01')
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 125.43%
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # 568.93%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-25', '2025-12-01') 
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-12-15', '2025-12-24') # 568.93%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-09-01', '2025-12-01') # 568.93%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-25', '2025-12-01') 
     
     # 计算因子数据
     print('开始计算指标')
@@ -172,10 +173,6 @@ def main():
         # 当前时间切面，所有币对数据
         current_window_time = time_windows[idx]
         current_timestamp_data = processed_df[processed_df['timestamp'] == current_window_time]
-        
-        # 下一时间切面，所有币对数据
-        next_window_time = time_windows[idx + 1]
-        next_timestamp_data = processed_df[processed_df['timestamp'] == next_window_time]
 
         # 当前时间窗口，所有币对的 指标/因子数据
         print(current_window_time)
@@ -183,7 +180,7 @@ def main():
         print(f"当前时间: {datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"当前账户余额: {cash_balance:.2f} USDT")
 
-        # 没有持仓：开仓信号计算，进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
+        # 一）没有持仓：开仓信号计算，进行开仓逻辑计算，主要依靠generate_open_signal方法，开仓成功后将会结束当前循环
         if current_position is None:
             print('当前无持仓, 计算开仓信号')
 
@@ -195,70 +192,71 @@ def main():
                 print('无开仓信号')
                 continue
 
-            # 下单仓位，指数下单
-            margin = cash_balance * 0.5
-            leverage = 2
-
-            if cash_balance < margin:
-                print(f"资金不足 ({cash_balance:.2f} USDT)<{margin}，跳过开仓")
-                continue
-            
-            # 记录开仓信息
-            current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == signal['symbol']]
-            next_symbol_row = next_timestamp_data[next_timestamp_data['symbol'] == signal['symbol']]
-            
-            if next_symbol_row.empty:
-                print(f"警告: 无法获取 {signal['symbol']} 在下一时刻 {datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ)} 的数据，跳过开仓")
-                continue
-                
-            entry_price = float(next_symbol_row.iloc[0]['open'])
-            quantity = (margin * leverage) / entry_price
-
             current_position = {
                 'symbol': signal['symbol'],
                 'side': 'BUY',
                 'sign_open_time': current_window_time,
                 'sign_open_time_str': datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
-                'trade_open_time': next_window_time,
-                'trade_open_time_str': datetime.fromtimestamp(next_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
-                'entry_price': entry_price,
-                'highest_price': entry_price,
-                'quantity': quantity,
-                'atr': float(current_symbol_row.iloc[0]['atr']),
-                'atr_stop_price': entry_price - 0.7 * float(current_symbol_row.iloc[0]['atr']),
-                'margin': margin,
-                'leverage': leverage,
             }
-            print(f"开仓: {current_position['symbol']} 做多 价格: {entry_price:.6f} 数量: {quantity:.6f}")
+            print(f"发现做多开仓信号: {current_position['symbol']}")
             print(current_position)
             continue
 
         
-        # 有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为）
+        # 二）有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为）
         else:
             # 当前信号数据
             current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == current_position['symbol']].iloc[0]
             
+            # 如果第一次出现信号，却没有开仓时间，说明需要主动赋值
+            if current_position.get('trade_open_time') is None:
+                # 计算开仓参数
+                entry_price = float(current_symbol_row['open'])
+                margin = cash_balance * 0.9
+                quantity = margin / entry_price
+
+                current_position = {
+                    # 开仓信号带来的
+                    'symbol': current_position['symbol'],
+                    'side': current_position['side'],
+                    'sign_open_time': current_position['sign_open_time'],
+                    'sign_open_time_str': current_position['sign_open_time_str'],
+                    
+                    # 回测循环计算的，开仓时间
+                    'trade_open_time': current_window_time,
+                    'trade_open_time_str': datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
+                    
+                    # 核心要计算的，开仓平仓价格
+                    'entry_price': entry_price, # 固定
+                    'history_highest_price': entry_price, # 会变化
+                    'exit_price': None, # 固定
+
+                    # 购买
+                    'margin': margin,
+                    'quantity': quantity, # 不变
+                }
+                
+                print(f"执行开仓: {current_position['symbol']} 时间: {current_position['trade_open_time_str']} 价格: {entry_price} 数量: {quantity}")
+
             # 计算平仓信号
             close_signal = generate_close_signal(current_position, current_symbol_row)
-            
+
             # 出现平仓信号，说明本次交易已经结束
             if close_signal is not None:
                 print(f"平仓信号: {close_signal['date_str']} 原因: {close_signal.get('reason', 'signal')}")
                 
                 # 确定平仓价格
                 # 如果是固定止损(Low触发)，价格为止损价；如果是ATR(Close触发)，价格为收盘价
+                entry_price = float(current_position['entry_price'])
                 exit_price = float(close_signal.get('stop_price', current_symbol_row['close']))
 
-                entry_price = float(current_position['entry_price'])
                 qty = float(current_position['quantity'])
                 margin = float(current_position.get('margin', 100.0))
-                leverage = current_position.get('leverage', 10)
 
                 entry_fee = entry_price * qty * 0.0005
                 exit_fee = exit_price * qty * 0.0005
                 profit = qty * (exit_price - entry_price) - entry_fee - exit_fee
-                profit_pct = (profit / (margin * leverage) * 100.0) if margin != 0 else 0.0
+                profit_pct = (profit / margin * 100.0) if margin != 0 else 0.0
                 cash_balance = cash_balance + profit
 
                 record = {
@@ -273,19 +271,10 @@ def main():
                     
                     'entry_price': entry_price,
                     'exit_price': exit_price,
-                    'atr': current_position['atr'],
-                    'atr_stop_price': current_position['atr_stop_price'],
+
                     'profit': profit,
                     'profit_pct': profit_pct,
-                    'adverse_move_pct': 0.0, 
-                    'quantity': qty,
                     'final_balance': cash_balance,
-                    'side': current_position['side'],
-
-
-                    'margin': margin,
-                    'leverage': leverage,
-                    'stop_out': 'Stop' in close_signal.get('reason', ''),
                 }
 
                 trade_records_list.append(record)
@@ -295,10 +284,10 @@ def main():
                 if cash_balance < 100.0:
                     print(f"资金低于 100 USDT，停止后续交易")
                     break
+            # 没有平仓信号，则需要更新最高价，供下次平仓信号计算
             else:
-                # 没有平仓信号，则需要更新最高价，供下次平仓信号计算
-                if float(current_symbol_row['high']) > current_position['highest_price']:
-                    current_position['highest_price'] = float(current_symbol_row['high'])
+                if float(current_symbol_row['high']) > current_position['history_highest_price']:
+                    current_position['history_highest_price'] = float(current_symbol_row['high'])
 
         # print(current_position)
 

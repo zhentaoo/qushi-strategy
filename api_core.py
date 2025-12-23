@@ -206,8 +206,10 @@ def get_quantity(symbol, usdt_amount):
         # 获取交易对信息
         exchange_info = get_exchange_info()
         rule = next(s for s in exchange_info["symbols"] if s["symbol"] == symbol)
-        print('====rule====')
+        print('====rule start====')
         print(rule)
+        print('====rule end====')
+
         
         step = float(next(f["stepSize"] for f in rule["filters"] if f["filterType"] == "LOT_SIZE"))
         min_qty = float(next(f["minQty"] for f in rule["filters"] if f["filterType"] == "LOT_SIZE"))
@@ -231,148 +233,19 @@ def get_quantity(symbol, usdt_amount):
         print(f"计算下单数量失败: {e}")
         return None, 4
 
-# 下单接口(市价)
-def place_order(signal,side,usdt_amount = 6, leverage = 1):
-    """执行交易订单"""
-    print("=== 执行交易订单 ===")
-    if not signal:
-        print("没有交易信号，跳过下单")
-        return None
-
-    symbol = signal['symbol']
-    set_leverage(symbol, leverage)
-    
-    try:
-        qty, price, price_precision = get_quantity(symbol, usdt_amount)
-        if qty is None:
-            return None
-        
-        print(f"准备{'做空' if side == 'SELL' else '做多'} {symbol}: 数量={qty}, 价格={price}")
-        order_result = signed_request("POST", "/fapi/v1/order", {
-            "symbol": symbol,
-            "side": side,
-            "type": "MARKET",
-            "quantity": qty
-        })
-        print(f"订单结果: {order_result}")
-
-        if 'orderId' in order_result:
-            return {
-                'success': True,
-                'symbol': symbol,
-                'side': side,
-                'quantity': qty,
-                'order_result': order_result,
-                'signal': signal
-            }
-        else:
-            return {
-                'success': False,
-                'symbol': symbol,
-                'side': side,
-                'error': order_result,
-                'signal': signal
-            }
-    except Exception as e:
-        error_msg = f"{'卖出' if side == 'SELL' else '买入'}下单失败: {e}"
-        print(error_msg)
-        return {
-            'success': False,
-            'symbol': symbol,
-            'error': error_msg,
-            'signal': signal
-        }
-
-# 止盈止损委托接口
-# side: 原始持仓方向
-# stop_loss_price_ratio: 止损位价格相对于当前价格的比例
-def place_tp_sl_order(symbol, originSide, quantity, take_profit_price=None, stop_loss_price=None):
-    print("=== 下止盈止损委托单 ===")
-    
-    # 平仓方向
-    reverseSide = None
-
-    if originSide == "SELL":
-        reverseSide = "BUY"
-    else:
-        reverseSide = "SELL"
-
-    results = []
-    
-    try:
-        # 获取交易对精度信息
-        exchange_info = get_exchange_info()
-        if not exchange_info:
-            return {'success': False, 'error': '获取交易对信息失败'}
-        
-        rule = next(s for s in exchange_info["symbols"] if s["symbol"] == symbol)
-        price_precision = rule.get("pricePrecision", 4)
-        
-        # 下止盈单
-        if take_profit_price:
-            tp_price = round(float(take_profit_price), price_precision)
-            
-            tp_order = signed_request("POST", "/fapi/v1/order", {
-                "symbol": symbol,
-                "side": reverseSide,
-                "type": "TAKE_PROFIT_MARKET",
-                "quantity": quantity,
-                "stopPrice": tp_price,
-                "reduceOnly": "true",
-                "timeInForce": "GTC",
-                "workingType": "CONTRACT_PRICE"
-            })
-            
-            results.append({
-                'type': 'take_profit',
-                'order': tp_order,
-                'price': tp_price
-            })
-            print(f"止盈单结果: {tp_order}")
-        
-        # 下止损单
-        if stop_loss_price:
-            sl_price = round(float(stop_loss_price), price_precision)
-            
-            sl_order = signed_request("POST", "/fapi/v1/order", {
-                "symbol": symbol,
-                "side": reverseSide,
-                "type": "STOP_MARKET",
-                "quantity": quantity,
-                "stopPrice": sl_price,
-                "reduceOnly": "true",
-                "timeInForce": "GTC",
-                "workingType": "MARK_PRICE"
-            })
-            
-            results.append({
-                'type': 'stop_loss',
-                'order': sl_order,
-                'price': sl_price
-            })
-            print(f"止损单结果: {sl_order}")
-        
-        return {
-            'success': True,
-            'symbol': symbol,
-            'orders': results
-        }
-        
-    except Exception as e:
-        print(f"下止盈止损单失败: {e}")
-        return None
-
 # 清仓订单接口（市价）
-def close_position(symbol, position_amt):
+def close_position(symbol,positionAmt):
     """清仓订单"""
     try:
         close_result = signed_request("POST", "/fapi/v1/order", {
             "symbol": symbol,
-            "side": "BUY" if position_amt < 0 else "SELL",  # 空头用买入平仓，多头用卖出平仓
+            "side": "SELL",  # 空头用买入平仓，多头用卖出平仓
             "type": "MARKET",
-            "quantity": abs(position_amt),
+            "quantity": positionAmt,
+            # "closePosition": "true",
             "reduceOnly": "true"
         })
+        print(close_result)
         return close_result
     except Exception as e:
         print(f"清仓失败: {str(e)}")
@@ -462,24 +335,6 @@ def send_custom_wechat_message(message):
         print(f"发送自定义微信通知失败: {e}")
         return False
 
-# 撤销全部订单接口（指定交易对）
-def cancel_all_orders(symbol):
-    print(f"=== 撤销 {symbol} 的所有挂单 ===")
-    
-    try:
-        # 调用币安API撤销指定交易对的所有挂单
-        result = signed_request("DELETE", "/fapi/v1/allOpenOrders", {"symbol": symbol})
-        print(f"撤销所有挂单结果: {result}")
-        return {'success': True, 'symbol': symbol, 'result': result}
-    except Exception as e:
-        error_msg = f"撤销所有挂单失败: {str(e)}"
-        print(error_msg)
-        return {
-            'success': False,
-            'symbol': symbol,
-            'error': error_msg
-        }
-
 # 获取未完成挂单列表（可选按symbol过滤）
 def get_open_orders(symbol: str | None = None):
     try:
@@ -492,100 +347,108 @@ def get_open_orders(symbol: str | None = None):
         print(f"获取未完成挂单失败: {e}")
         return []
 
-# 撤销账户当前全部挂单（遍历交易对逐个撤销）
-def cancel_all_open_orders():
-    try:
-        open_orders = get_open_orders()
-        if not isinstance(open_orders, list) or len(open_orders) == 0:
-            print("目前无未完成挂单")
-            return {"success": True, "message": "无未完成挂单", "symbols": []}
-        symbols = {o.get("symbol") for o in open_orders if o.get("symbol")}
-        print(f"准备撤销 {len(open_orders)} 条挂单，涉及 {len(symbols)} 个交易对")
-        errors = []
-        for sym in symbols:
-            res = cancel_all_orders(sym)
-            if not res.get('success', False):
-                errors.append({"symbol": sym, "error": res.get('error')})
-        return {"success": len(errors) == 0, "symbols": list(symbols), "errors": errors}
-    except Exception as e:
-        print(f"撤销全部挂单失败: {e}")
-        return {"success": False, "error": str(e)}
 
-
-# algo：跟踪止损止盈单
-def place_trailing_stop_order(symbol, quantity, callback_rate):
-    """
-    下移动止盈/止损单 (TRAILING_STOP_MARKET)
-    :param symbol: 交易对
-    :param position_side: 持仓方向 ('BUY' or 'SELL')
-    :param quantity: 数量
-    :param callback_rate: 回调比例 (0.1% - 5.0%)
-    """
-    print(f"=== 下移动止损单 {symbol} ===")
-    
-    
-    # 限制 callback_rate 范围 [0.1, 5.0]
-    # callbackRate in Binance API is passed as percentage, e.g. 1.0 for 1%
-    rate = max(0.1, min(10.0, round(float(callback_rate), 1)))
-    
-    params = {
-        "algoType": "CONDITIONAL",
-        "symbol": symbol,
-        "side": 'SELL',
-        "type": "TRAILING_STOP_MARKET",
-        "quantity": quantity,
-        "callbackRate": rate,
-        "reduceOnly": "true",
-    }
-    
-    try:
-        res = signed_request("POST", "/fapi/v1/algoOrder", params)
-        print(f"移动止损单结果: {res}")
-        return res
-    except Exception as e:
-        print(f"下移动止损单失败: {e}")
+# 下单接口(市价)
+def place_market_order(signal,side,usdt_amount = 6, leverage = 1):
+    """执行交易订单"""
+    print("=== 执行交易订单 ===")
+    if not signal:
+        print("没有交易信号，跳过下单")
         return None
 
-
-# algo 取消所有的跟踪止损单
-def cancel_all_trailing_stop_orders():
-    print(f"=== 撤销所有移动止损单 ===")
+    symbol = signal['symbol']
+    set_leverage(symbol, leverage)
+    
     try:
-        # 获取该交易对所有未完成的策略挂单 (algoOpenOrders)
-        params = {"timestamp": int(time.time() * 1000)}
-        open_orders = signed_request("GET", "/fapi/v1/openAlgoOrders", params=params)
+        qty, price, price_precision = get_quantity(symbol, usdt_amount)
+        if qty is None:
+            return None
         
-        print(f"获取 所有未完成策略挂单结果: {open_orders}")
-        if not open_orders or not isinstance(open_orders, list):
-            print(f"没有未完成挂单")
-            return []
-        
-        # # 筛选出移动止损单 (TRAILING_STOP_MARKET)
-        trailing_stops = [o for o in open_orders if o.get('orderType') == 'TRAILING_STOP_MARKET']
-        
-        if not trailing_stops:
-            print(f"没有移动止损单")
-            return []
-            
-        print(f"发现 {len(trailing_stops)} 个移动止损单，开始撤销...")
-        results = []
-        
-        for order in trailing_stops:
-            order_id = order.get('orderId')
-            symbol = order.get('symbol')
+        print(f"准备{'做空' if side == 'SELL' else '做多'} {symbol}: 数量={qty}, 价格={price}")
+        order_result = signed_request("POST", "/fapi/v1/order", {
+            "symbol": symbol,
+            "side": side,
+            "type": "MARKET",
+            "quantity": qty
+        })
+        print(f"订单结果: {order_result}")
 
-            print(f"正在撤销订单 ID: {order_id}")
+        if 'orderId' in order_result:
+            return {
+                'success': True,
+                'symbol': symbol,
+                'side': side,
+                'quantity': qty,
+                'order_result': order_result,
+                'signal': signal
+            }
+        else:
+            return {
+                'success': False,
+                'symbol': symbol,
+                'side': side,
+                'error': order_result,
+                'signal': signal
+            }
+    except Exception as e:
+        error_msg = f"{'卖出' if side == 'SELL' else '买入'}下单失败: {e}"
+        print(error_msg)
+        return {
+            'success': False,
+            'symbol': symbol,
+            'error': error_msg,
+            'signal': signal
+        }
+
+# 撤销所有止损单
+def cancel_all_stop_orders(symbol: str | None = None):
+    print("=== 撤销所有止损单 ===")
+    try:
+        result = signed_request("DELETE", "/fapi/v1/algoOpenOrders", {"symbol": symbol})
+        print(f"撤销所有止损单结果: {result}")
+        return {'success': True, 'result': result}
+    except Exception as e:
+        error_msg = f"撤销所有止损单失败: {str(e)}"
+        print(error_msg)
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+
+
+# 下止损市价清仓单（配合s1 guard脚本，不停抬升止损单 价格，以便锁定利润）
+def place_stop_market_order(symbol, stop_price):
+    print(f"=== 下止损单: {symbol} ===")
+    
+    try:
+        # 获取交易对精度
+        exchange_info = get_exchange_info()
+        rule = next((s for s in exchange_info["symbols"] if s["symbol"] == symbol), None)
+        if not rule:
+            print(f"未找到交易对规则: {symbol}")
+            return None
             
-            # 撤销单个订单 (普通撤单接口即可撤销 trailing stop)
-            res = signed_request("DELETE", "/fapi/v1/algoOpenOrders", {
-                "symbol": symbol,
-                "orderId": order_id
-            })
-            results.append(res)
-            print(f"撤销结果: {res}")
-            
-        # return results
+        price_precision = rule.get("pricePrecision", 4)
+        stop_price = round(float(stop_price), price_precision)
+        
+        params = {
+            "algoType": "CONDITIONAL",
+            "symbol": symbol,
+            "side": 'SELL',
+            "type": "STOP_MARKET",
+            "triggerPrice": stop_price,
+            "timeInForce": "GTC",
+            "workingType": "MARK_PRICE",
+            "closePosition": "true"
+        }
+        
+        print(f"止损单参数: {params}")
+        order_result = signed_request("POST", "/fapi/v1/algoOrder", params)
+        print(f"止损单结果: {order_result}")
+        
+        return order_result
         
     except Exception as e:
-        print(f"撤销移动止损单失败: {e}")
+        print(f"下止损单失败: {e}")
         return None

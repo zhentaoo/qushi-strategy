@@ -22,7 +22,6 @@ from s1_strategy import generate_open_signal
 # 配置
 COLLECTION_NAME = 'runtime_symbol_factor_1h_kline'
 LEVERAGE = 1         # 杠杆倍数
-# ORDER_AMOUNT_USDT = 7  # 单笔下单金额
 ORDER_AMOUNT_USDT = 3000  # 单笔下单金额
 
 def get_latest_data_for_all_symbols():
@@ -63,22 +62,22 @@ def main():
         return
 
     # 计算信号
-    # signal = {
-    #     'symbol': 'ZKUSDT'
-    # }
-    signal = generate_open_signal(df)
+    signal = {
+        'symbol': 'HUSDT'
+    }
+    # signal = generate_open_signal(df)
     
     if signal:
         symbol = signal['symbol']
         
-        # 获取该币的 NATR
+        # 获取该币的 ATR
         symbol_row = df[df['symbol'] == symbol]
         print(symbol_row)
 
-        natr = float(symbol_row.get('natr', 0))
+        atr = float(symbol_row.get('atr', 0))
         price = float(symbol_row.get('close', 0))
         
-        print(f"发现开仓信号: {symbol}, 参考价: {price}, NATR: {natr}")
+        print(f"发现开仓信号: {symbol}, 参考价: {price}, ATR: {atr}")
         
         # 计算下单金额
         balance_info = api_core.get_balance()
@@ -91,26 +90,11 @@ def main():
         print(f"准备下单: {symbol}, 金额: {usdt_amount} USDT")
         
         # 1. 市价开仓
-        order_res = api_core.place_order(signal, 'BUY', usdt_amount=usdt_amount, leverage=LEVERAGE)
+        order_res = api_core.place_market_order(signal, 'BUY', usdt_amount=usdt_amount, leverage=LEVERAGE)
         
         if order_res and order_res.get('success'):
-            print("开仓下单成功!")
-            
-            # 获取实际成交数量 (从 order_res 返回结果中获取 quantity)
-            qty = order_res.get('quantity')
-            
-            if qty and qty > 0:
-                # 2. 下移动止损单
-                # 回调比例 = 0.7 * NATR
-                callback_rate = 0.7 * natr
-                print(f"准备下移动止损单: 数量 {qty}, 回调比例 {callback_rate:.2f}% (NATR={natr})")
-                
-                # 等待一小会儿确保仓位更新 (虽然 trailing stop 不需要仓位确认，只要 reduceOnly 即可)
-                time.sleep(1)
-                
-                api_core.place_trailing_stop_order(symbol, qty, callback_rate)
-            else:
-                print("未获取到下单数量，无法下止损单")
+            print("开仓下单成功")
+            # 通过仓位信息，获取开仓价，计算止损价
         else:
             print(f"开仓失败: {order_res.get('error') if order_res else '未知错误'}")
     else:
