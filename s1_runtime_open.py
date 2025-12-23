@@ -22,7 +22,7 @@ from s1_strategy import generate_open_signal
 # 配置
 COLLECTION_NAME = 'runtime_symbol_factor_1h_kline'
 LEVERAGE = 1         # 杠杆倍数
-ORDER_AMOUNT_USDT = 3000  # 单笔下单金额
+ORDER_MAX_AMOUNT_USDT = 3000  # 单笔下单最高金额
 
 def get_latest_data_for_all_symbols():
     """从数据库获取所有币对最新的1条数据"""
@@ -62,10 +62,10 @@ def main():
         return
 
     # 计算信号
-    signal = {
-        'symbol': 'HUSDT'
-    }
-    # signal = generate_open_signal(df)
+    # signal = {
+    #     'symbol': 'HUSDT'
+    # }
+    signal = generate_open_signal(df)
     
     if signal:
         symbol = signal['symbol']
@@ -85,7 +85,7 @@ def main():
         available_balance = balance_info.get("availableBalance", 0) if balance_info else 0
         available = float(available_balance) * 0.9
 
-        usdt_amount = min(available, ORDER_AMOUNT_USDT)
+        usdt_amount = min(available, ORDER_MAX_AMOUNT_USDT)
         
         print(f"准备下单: {symbol}, 金额: {usdt_amount} USDT")
         
