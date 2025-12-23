@@ -56,13 +56,15 @@ read -r -d '' NEW_ENTRIES <<EOF || true
 # === 交易策略任务（由 $DIR/run.sh 于 $(date) 安装） ===
 
 # 每个整小时：运行大盘脚本，拉取数据
-0  * * * * sleep 5 && cd "$DIR" && $PYTHON_BIN s1_runtime_dapan.py >> "$LOG_DIR/s1_runtime_dapan.py.log" 2>&1
+0  * * * * sleep 10 && cd "$DIR" && $PYTHON_BIN s1_runtime_dapan.py >> "$LOG_DIR/s1_runtime_dapan.py.log" 2>&1
 
 # 每个整小时：运行策略脚本，执行交易
 1  * * * * cd "$DIR" && $PYTHON_BIN s1_runtime_open.py >> "$LOG_DIR/s1_runtime_open.log" 2>&1
 
-# 每分钟：运行止损守护脚本
-*  * * * * cd "$DIR" && $PYTHON_BIN s1_runtime_close.py >> "$LOG_DIR/s1_runtime_close.log" 2>&1
+# 每20s：运行止损守护脚本
+* * * * * cd "$DIR" && $PYTHON_BIN s1_runtime_close.py >> "$LOG_DIR/s1_runtime_close.log" 2>&1
+* * * * * sleep 20 && cd "$DIR" && $PYTHON_BIN s1_runtime_close.py >> "$LOG_DIR/s1_runtime_close.log" 2>&1
+* * * * * sleep 40 && cd "$DIR" && $PYTHON_BIN s1_runtime_close.py >> "$LOG_DIR/s1_runtime_close.log" 2>&1
 # === 结束 ===
 EOF
 
