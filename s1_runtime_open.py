@@ -83,7 +83,7 @@ def main():
         balance_info = api_core.get_balance()
 
         available_balance = balance_info.get("availableBalance", 0) if balance_info else 0
-        available = float(available_balance) * 0.9
+        available = float(available_balance) * 0.95
 
         usdt_amount = min(available, ORDER_MAX_AMOUNT_USDT)
         
