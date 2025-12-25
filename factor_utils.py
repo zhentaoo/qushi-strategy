@@ -65,8 +65,10 @@ def compute_single_symbol_factor(g: pd.DataFrame):
     g['bollinger_lower'] = safe_ta(bb, 'BBL_20_2.0').shift(1)
 
     # ========= ATR =========
-    g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=14).shift(1)
-    g['natr'] = g['atr'] / g['close'] * 100
+    g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=14) # 生产用，因为实盘的currentdata就是前一个
+    g['atr_pre1'] = g['atr'].shift(1) # 回测用（因为currentdata，要用前一个）
+    g['atr_pre2'] = g['atr'].shift(2)
+
 
     # ========= ADX =========
     adx = ta.adx(g['high'], g['low'], g['close'], length=14)

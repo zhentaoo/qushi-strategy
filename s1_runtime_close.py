@@ -18,7 +18,9 @@ def get_atr(symbol):
         if df is not None and not df.empty:
             row = df[df['symbol'] == symbol]
             if not row.empty:
-                atr = float(row.iloc[0].get('atr', 0))
+                # atr = float(row.iloc[0].get('atr', 0))
+                atr = float(row.iloc[0].get('atr_pre1', 0))
+                # atr = float(row.iloc[0].get('atr_pre2', 0))
                 return atr
     except Exception as e:
         print(f"获取ATR失败: {e}")
@@ -107,8 +109,9 @@ def main():
                     api_core.send_custom_wechat_message(
                         f"🛑 移动止损触发\n"
                         f"币种: {symbol}\n"
-                        f"最高价: {high_price}\n"
-                        f"当前价: {current_price}\n"
+                        f"开仓价: {entry_price:.4f}\n"
+                        f"最高价: {high_price:.4f}\n"
+                        f"当前价: {current_price:.4f}\n"
                         f"止损线: {stop_loss_price:.4f}\n"
                         f"ATR: {atr:.4f}\n"
                         f"执行清仓"

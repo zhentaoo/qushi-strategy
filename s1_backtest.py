@@ -139,8 +139,8 @@ def main():
     start_time = time.time()
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-12-01')
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 125.43%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-12-15', '2025-12-24') # 568.93%
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-12-15', '2025-12-24') # 568.93%
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-09-01', '2025-12-01') # 568.93%
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-25', '2025-12-01') 
     

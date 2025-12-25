@@ -9,7 +9,7 @@
    - 计算开仓信号
    - 若有信号：
      - 市价买入
-     - 立即下移动止损单 (TRAILING_STOP_MARKET)，回调比例 0.7 * NATR
+     - 立即下移动止损单 (TRAILING_STOP_MARKET)，回调比例 0.7 * ATR
 """
 
 import time
@@ -62,10 +62,10 @@ def main():
         return
 
     # 计算信号
-    # signal = {
-    #     'symbol': 'HUSDT'
-    # }
     signal = generate_open_signal(df)
+    signal = {
+        'symbol': 'HUSDT'
+    }
     
     if signal:
         symbol = signal['symbol']
@@ -91,9 +91,25 @@ def main():
         
         # 1. 市价开仓
         order_res = api_core.place_market_order(signal, 'BUY', usdt_amount=usdt_amount, leverage=LEVERAGE)
-        
+
         if order_res and order_res.get('success'):
             print("开仓下单成功")
+            positions = api_core.get_account_position()
+            if positions:
+                entry_price = float(positions[0].get('entryPrice', 0))
+            else:
+                entry_price = price
+
+            stop_price = entry_price - (0.7 * atr)
+
+            api_core.send_custom_wechat_message(
+                f"开仓信号\n"
+                f"币种: {symbol}\n"
+                f"市价单·开仓价: {entry_price:.4f}\n"
+                f"ATR: {atr:.4f}\n"
+                f"计划初始止损线: {stop_price:.4f}\n"
+                f"执行清仓"
+            )
             # 通过仓位信息，获取开仓价，计算止损价
         else:
             print(f"开仓失败: {order_res.get('error') if order_res else '未知错误'}")
