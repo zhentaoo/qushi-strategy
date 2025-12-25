@@ -77,8 +77,7 @@ def generate_close_signal(current_position, current_symbol_data):
     # 历史最高
     history_highest_price = float(current_position.get('history_highest_price'))
     
-    # atr = float(current_symbol_data.get('atr', 0))    
-    atr = float(current_symbol_data.get('atr_pre1', 0))      
+    atr = float(current_symbol_data.get('atr_pre1', 0)) # 回测必须用atr shift 1
     low_price = float(current_symbol_data['low'])
     
     print('****')

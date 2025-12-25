@@ -63,9 +63,9 @@ def main():
 
     # 计算信号
     signal = generate_open_signal(df)
-    signal = {
-        'symbol': 'HUSDT'
-    }
+    # signal = {
+    #     'symbol': 'HUSDT'
+    # }
     
     if signal:
         symbol = signal['symbol']
