@@ -18,7 +18,7 @@ def get_atr(symbol):
         if df is not None and not df.empty:
             row = df[df['symbol'] == symbol]
             if not row.empty:
-                atr = float(row.iloc[0].get('atr', 0)) # 使用历史第一根（和回测的atr_pre1 数据是一样的）
+                atr = float(row.iloc[0].get('atr', 0)) # 使用历史第一根（实盘的atr = 回测的atr_pre1）
                 return atr
     except Exception as e:
         print(f"获取ATR失败: {e}")

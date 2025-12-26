@@ -13,7 +13,7 @@ def compute_single_symbol_factor(g: pd.DataFrame):
     """
     g: 单 symbol + 单 interval + 已按时间排序
     """
-    if len(g) < 70:
+    if len(g) < 65:
         return g
 
     g = g.sort_values('timestamp').copy()
@@ -45,7 +45,7 @@ def compute_single_symbol_factor(g: pd.DataFrame):
 
     # ========= ADX =========
     adx = ta.adx(g['high'], g['low'], g['close'], length=14)
-    g['adx'] = safe_ta(adx, 'ADX_14').shift(1)  
+    g['adx'] = safe_ta(adx, 'ADX_14')
 
     return g
 

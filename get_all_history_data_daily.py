@@ -196,7 +196,7 @@ def download_and_save_data():
         symbol = symbol_info['symbol']
         
         # Iterate days
-        for year, month, day in get_recent_days(5):
+        for year, month, day in get_recent_days(15):
             month_str = f"{month:02d}"
             day_str = f"{day:02d}"
             filename = f"{symbol}-1h-{year}-{month_str}-{day_str}.zip"

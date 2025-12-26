@@ -64,7 +64,7 @@ def generate_open_signal(current_data, top_n = 30):
     }
     return signal
 
-# 根据当前持仓，计算平仓信号
+# 根据当前持仓，计算平仓信号，使用的是实时数据，所以要特别注意是否有问题，一些指标只能用shift 1
 def generate_close_signal(current_position, current_symbol_data):
     """
     生成平仓信号
@@ -74,21 +74,22 @@ def generate_close_signal(current_position, current_symbol_data):
     if current_position is None or current_symbol_data is None:
         return None
 
-    # 历史最高
+    # 历史最高，初始值是entry price
     history_highest_price = float(current_position.get('history_highest_price'))
     
-    atr = float(current_symbol_data.get('atr_pre1', 0)) # 回测必须用atr shift 1
+    # 历史atr，回测必须用atr shift 1，模拟真实情况
+    atr = float(current_symbol_data.get('atr_pre1', 0)) # 回测必须用atr shift 1，模拟真实情况
+    
+    # 当前最低价
     low_price = float(current_symbol_data['low'])
     
     print('****')
     print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
-
     print(f"当前持仓: {current_position}")
     print(f"当前最高价: {history_highest_price}")
     print(f"当前最低价: {low_price}")
     print(f"当前ATR: {atr}")
     print(f"当前ATR止损价格: {history_highest_price - (0.7 * atr)}")
-
     print('****')
 
     # ATR动态止盈退出
@@ -112,6 +113,7 @@ def generate_close_signal(current_position, current_symbol_data):
             'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
             'side': 'SELL',
             'reason': 'ATR_Trailing_Stop',
+            'atr': atr,
             'stop_price': atr_stop_price, # ATR止盈通常基于收盘价确认
             'price_type': 'atr_stop_price'
         }

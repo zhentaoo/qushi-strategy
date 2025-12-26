@@ -129,20 +129,33 @@ def main():
     mongo_utils.delete_data('trade_records')
     mongo_utils.delete_data('factor_processed_kline')
 
-    # exclude = [
-    #     'BTCUSDT','ETHUSDT','BNBUSDT',
-    #     'USDTUSDT','BUSDUSDT','USDCUSDT'
-    #     'TUSDUSDT','WBTCUSDT','WETHUSDT'
-    # ]
 
     # 1. 从MongoDB获取1h K线数据
     start_time = time.time()
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-12-01')
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 125.43%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 576.37%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-12-15', '2025-12-24') # 568.93%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-09-01', '2025-12-01') # 568.93%
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-25', '2025-12-01') 
+    
+    # 24 + 25年
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-12-01') # 183837.86%
+
+    # 24年：
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 608.65%
+    
+    # 25年：
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 63248.41%
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # adx pre1，23171.92%，23171.92
+    
+    # 按月份
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-02-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-02-01', '2025-03-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-03-01', '2025-04-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-04-01', '2025-05-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-05-01', '2025-06-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-07-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-07-01', '2025-08-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-08-01', '2025-09-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-09-01', '2025-10-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-10-01', '2025-11-01') #
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-11-01', '2025-12-01') #
+    
     
     # 计算因子数据
     print('开始计算指标')
@@ -271,6 +284,8 @@ def main():
                     
                     'entry_price': entry_price,
                     'exit_price': exit_price,
+
+                    'atr': close_signal.get('atr'),
 
                     'profit': profit,
                     'profit_pct': profit_pct,
