@@ -23,8 +23,8 @@ def generate_open_signal(current_data, top_n = 30):
     if valid_data.empty:
         return None
 
-    market_season = 'winter' # summer是市场热的时候，也是山寨币好的时候
-
+    market_season = None
+    
     BTC_data = valid_data[valid_data['symbol'] == 'BTCUSDT']
     print(BTC_data)
     btc_close = float(BTC_data['close'].iloc[0])
@@ -33,13 +33,17 @@ def generate_open_signal(current_data, top_n = 30):
     btc_adx = float(BTC_data['adx'].iloc[0])
     btc_atr_ratio = float(BTC_data['atr'].iloc[0] / btc_close)
 
-    if (btc_ma25 > btc_ma96 and
-        18 <= btc_adx <= 30 and
-        btc_atr_ratio <= 0.01):
-        market_season = 'summer'
+    btc_forbidden = (
+        btc_ma25 < btc_ma96
+        or btc_adx > 55
+        or btc_atr_ratio > 0.012
+    )
 
-    # if market_season == 'winter':
-    #     return None
+    if (btc_forbidden):
+        market_season = 'bad'
+
+    if market_season == 'bad':
+        return None
 
     top_df = valid_data.nlargest(top_n, 'roc_64')
     filtered_df = pd.DataFrame()
