@@ -140,7 +140,7 @@ def main():
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2024-02-01', '2025-01-01') # 608.65%
     
     # 25年：
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') # 63248.41%
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') #  10593.37%
     kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # adx pre1，23171.92%，23171.92
     
     # 按月份
@@ -216,8 +216,8 @@ def main():
             continue
 
         
-        # 二）有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为）
-        else:
+        # 二）有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为实盘是1h k线）
+        elif current_position is not None:
             # 当前信号数据
             current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == current_position['symbol']].iloc[0]
             
@@ -227,6 +227,7 @@ def main():
                 entry_price = float(current_symbol_row['open'])
                 margin = cash_balance * 0.9
                 quantity = margin / entry_price
+                atr = float(current_symbol_row['atr'])
 
                 current_position = {
                     # 开仓信号带来的
@@ -240,9 +241,11 @@ def main():
                     'trade_open_time_str': datetime.fromtimestamp(current_window_time/1000, tz=CHINA_TZ).strftime('%Y-%m-%d %H:%M:%S'),
                     
                     # 核心要计算的，开仓平仓价格
-                    'entry_price': entry_price, # 固定
+                    'entry_price': entry_price, # 固定 开仓价
+                    
                     'history_highest_price': entry_price, # 会变化
-                    'exit_price': None, # 固定
+                    
+                    'exit_price': None, # 平仓价
 
                     # 购买
                     'margin': margin,
@@ -261,13 +264,13 @@ def main():
                 # 确定平仓价格
                 # 如果是固定止损(Low触发)，价格为止损价；如果是ATR(Close触发)，价格为收盘价
                 entry_price = float(current_position['entry_price'])
-                exit_price = float(close_signal.get('stop_price', current_symbol_row['close']))
+                exit_price = float(close_signal.get('stop_price'))
 
                 qty = float(current_position['quantity'])
                 margin = float(current_position.get('margin', 100.0))
 
-                entry_fee = entry_price * qty * 0.0005
-                exit_fee = exit_price * qty * 0.0005
+                entry_fee = entry_price * qty * 0.001
+                exit_fee = exit_price * qty * 0.001
                 profit = qty * (exit_price - entry_price) - entry_fee - exit_fee
                 profit_pct = (profit / margin * 100.0) if margin != 0 else 0.0
                 cash_balance = cash_balance + profit

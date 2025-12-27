@@ -17,7 +17,19 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         return g
 
     g = g.sort_values('timestamp').copy()
- 
+    
+    # ==== time str =====
+    g['timestamp_open_str'] = (
+        pd.to_datetime(g['timestamp'], unit='ms', utc=True)
+        .dt.tz_convert('Asia/Shanghai')
+        .dt.strftime('%Y-%m-%d %H:%M:%S')
+    )
+
+    g['timestamp_close_str'] = (
+        pd.to_datetime(g['close_time'], unit='ms', utc=True)
+        .dt.tz_convert('Asia/Shanghai')
+        .dt.strftime('%Y-%m-%d %H:%M:%S')
+    )
     # ========= price shift =========
     for n in [1, 2, 3]:
         for col in ['open', 'close', 'high', 'low', 'volume']:
@@ -40,12 +52,13 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         g[f'volume_ratio_{n}'] = g['volume'] / g[f'volume_ma_{n}']
 
     # ========= ATR =========
-    g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=14) # 生产用，因为实盘的currentdata就是前一个
+    g['atr'] = ta.atr(g['high'], g['low'], g['close'], length=20) # 生产用，因为实盘的currentdata就是前一个
     g['atr_pre1'] = g['atr'].shift(1) # 回测用（因为currentdata，要用前一个）
 
     # ========= ADX =========
     adx = ta.adx(g['high'], g['low'], g['close'], length=14)
     g['adx'] = safe_ta(adx, 'ADX_14')
+
 
     return g
 

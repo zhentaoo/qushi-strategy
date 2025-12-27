@@ -12,6 +12,7 @@ backtest_results/
 account_curve.png
 .cache/
 download.txt
+download.txt
 
 # Python 缓存文件
 __pycache__/

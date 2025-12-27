@@ -35,8 +35,10 @@ def generate_open_signal(current_data, top_n = 30):
         & (top_df['close_pre2'] > top_df['ma5_pre2'])
         & (top_df['close_pre3'] > top_df['ma5_pre3'])
         & (top_df['ma5'] > top_df['ma20'])
-        & (top_df['volume'] > top_df['volume_ma_10'] * 2) #必要条件，否则胜率和收益率大幅下降
-        & (top_df['volume'] < top_df['volume_ma_10'] * 7) #必要条件，否则胜率和收益率大幅下降
+        & (top_df['volume'] > top_df['volume_ma_10'] * 2) # 
+        # & (top_df['volume'] < top_df['volume_ma_10'] * 4) # 收益 510.39%
+        & (top_df['volume'] < top_df['volume_ma_10'] * 5) # 收益 2274%
+        # & (top_df['volume'] < top_df['volume_ma_10'] * 6) # 收益 999%
         & (top_df['adx'] > 45) # 329.67%
     ].copy()
 
@@ -73,50 +75,53 @@ def generate_close_signal(current_position, current_symbol_data):
     # 检查当前持仓是否为空
     if current_position is None or current_symbol_data is None:
         return None
-
-    # 历史最高，初始值是entry price
-    history_highest_price = float(current_position.get('history_highest_price'))
     
-    # 历史atr，回测必须用atr shift 1，模拟真实情况
-    atr = float(current_symbol_data.get('atr_pre1', 0)) # 回测必须用atr shift 1，模拟真实情况
-    
-    # 当前最低价
+    # 核心数据
+    atr = float(current_symbol_data.get('atr_pre1', 0)) # 回测必须用atr shift 1，模拟真实情况    
     low_price = float(current_symbol_data['low'])
-    
-    print('****')
-    print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"当前持仓: {current_position}")
-    print(f"当前最高价: {history_highest_price}")
-    print(f"当前最低价: {low_price}")
-    print(f"当前ATR: {atr}")
-    print(f"当前ATR止损价格: {history_highest_price - (0.7 * atr)}")
-    print('****')
+    open_price = float(current_symbol_data['open'])
 
-    # ATR动态止盈退出
-    # atr_stop_price = history_highest_price - (1.5 * atr) # 亏损 归零
-    # atr_stop_price = history_highest_price - (1.1 * atr) # 赢利 
-    # atr_stop_price = history_highest_price - 1 * atr # 胜率39%，盈利700%
-    # atr_stop_price = history_highest_price - 0.9 * atr # 胜率39.61%，盈利735.07%
-    # atr_stop_price = history_highest_price - 0.8 * atr # 胜率39.35，盈利835.54%
-    atr_stop_price = history_highest_price - 0.7 * atr # 胜率39.27%， 盈利976.82%（总收益率: 872.43%）
-    # atr_stop_price = history_highest_price - 0.6 * atr # 胜率37.79%，盈利877.65%
-    # atr_stop_price = history_highest_price - 0.5 * atr # 胜率33%，盈利726%
-    # atr_stop_price = history_highest_price - 0.4 * atr # 胜率24.43%，归零
-    # atr_stop_price = history_highest_price - 0.3 * atr # 胜率20.97%，617.30%
-    # atr_stop_price = history_highest_price - 0.2 * atr # 胜率12.96，盈利307.81%
+    history_highest_price = float(current_position.get('history_highest_price'))
 
-    # ATR动态止盈 
-    if low_price < atr_stop_price:
+
+    # 斩杀线持续更新、移动
+    atr_stop_price = history_highest_price - 0.7 * atr
+
+    # 如果下一个k线开盘价低于ATR止损价，就平仓
+    if open_price <= atr_stop_price:
+        print('****')
+        print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"当前持仓: {current_position}")
+        print(f"当前最高价: {history_highest_price}")
+        print(f"当前最低价: {low_price}")
+        print(f"当前ATR: {atr}")
+        # print(f"当前ATR止损价格: {atr_stop}")****
+        print('****')
         return {
             'symbol': current_position['symbol'],
             'timestamp': int(current_symbol_data['timestamp']),
             'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
-            'side': 'SELL',
-            'reason': 'ATR_Trailing_Stop',
             'atr': atr,
-            'stop_price': atr_stop_price, # ATR止盈通常基于收盘价确认
-            'price_type': 'atr_stop_price'
+            'stop_price': open_price,
         }
     
+    # 如果下一个k线开盘比atr高，但是最低价比atr止损价低，就平仓
+    if low_price <= atr_stop_price:
+        print('****')
+        print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"当前持仓: {current_position}")
+        print(f"当前最高价: {history_highest_price}")
+        print(f"当前最低价: {low_price}")
+        print(f"当前ATR: {atr}")
+        # print(f"当前ATR止损价格: {atr_stop}")****
+        print('****')
+        return {
+            'symbol': current_position['symbol'],
+            'timestamp': int(current_symbol_data['timestamp']),
+            'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
+            'atr': atr,
+            'stop_price': atr_stop_price,
+        }
+
     return None
     
