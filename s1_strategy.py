@@ -24,26 +24,26 @@ def generate_open_signal(current_data, top_n = 30):
         return None
 
     market_season = None
-    
-    BTC_data = valid_data[valid_data['symbol'] == 'BTCUSDT']
-    print(BTC_data)
-    btc_close = float(BTC_data['close'].iloc[0])
-    btc_ma25 = float(BTC_data['ma25'].iloc[0])
-    btc_ma96 = float(BTC_data['ma96'].iloc[0])
-    btc_adx = float(BTC_data['adx'].iloc[0])
-    btc_atr_ratio = float(BTC_data['atr'].iloc[0] / btc_close)
 
-    btc_forbidden = (
-        btc_ma25 < btc_ma96
-        or btc_adx > 55
-        or btc_atr_ratio > 0.012
-    )
+    # BTC_data = valid_data[valid_data['symbol'] == 'BTCUSDT']
+    # print(BTC_data)
+    # btc_close = float(BTC_data['close'].iloc[0])
+    # btc_ma25 = float(BTC_data['ma25'].iloc[0])
+    # btc_ma96 = float(BTC_data['ma96'].iloc[0])
+    # btc_adx = float(BTC_data['adx'].iloc[0])
+    # btc_atr_ratio = float(BTC_data['atr'].iloc[0] / btc_close)
 
-    if (btc_forbidden):
-        market_season = 'bad'
+    # btc_forbidden = (
+    #     btc_ma25 < btc_ma96
+    #     or btc_adx > 55
+    #     or btc_atr_ratio > 0.012
+    # )
 
-    if market_season == 'bad':
-        return None
+    # if (btc_forbidden):
+    #     market_season = 'bad'
+
+    # if market_season == 'bad':
+    #     return None
 
     top_df = valid_data.nlargest(top_n, 'roc_64')
     filtered_df = pd.DataFrame()
@@ -101,7 +101,8 @@ def generate_close_signal(current_position, current_symbol_data):
     
     # 回测必须用atr shift 1，模拟真实情况    
     entry_price = float(current_position.get('entry_price'))
-    atr = min(float(current_symbol_data.get('atr_pre1', 0)), 0.03 * entry_price) 
+    atr = float(current_symbol_data.get('atr_pre1', 0))
+    # atr = min(float(current_symbol_data.get('atr_pre1', 0)), 0.03 * entry_price)  # 不使用较好
 
     low_price = float(current_symbol_data['low'])
     open_price = float(current_symbol_data['open'])
@@ -109,10 +110,10 @@ def generate_close_signal(current_position, current_symbol_data):
     history_highest_price = float(current_position.get('history_highest_price'))
 
 
-    # 斩杀线持续更新、移动
-    # atr_stop_price = history_highest_price - 0.6 * atr # 172.24%
-    atr_stop_price = history_highest_price - 0.7 * atr # 274.20%
-    # atr_stop_price = history_highest_price - 1.2 * atr # 169.71%
+    # 斩杀线, 每小时更新，只会向上移动
+    # atr_stop_price = history_highest_price - 0.1 * atr
+    atr_stop_price = history_highest_price - 0.7 * atr
+    # atr_stop_price = history_highest_price - 1.2 * atr
 
     # 如果下一个k线开盘价低于ATR止损价，就平仓
     if open_price <= atr_stop_price:
