@@ -5,10 +5,14 @@ import mongo_utils
 import factor_utils
 
 
-a = api_core.get_account_position()
+
+
+mongo_utils.remove_duplicates('symbol_1h_kline')
+
+# a = api_core.get_account_position()
 # print(a)
 
-api_core.close_position(a[0]['symbol'],a[0]['positionAmt'])
+# api_core.close_position(a[0]['symbol'],a[0]['positionAmt'])
 
 # api_core.cancel_all_stop_orders(a[0]['symbol'])
 

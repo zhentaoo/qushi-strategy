@@ -142,6 +142,8 @@ def main():
     # 25年：
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') #  10593.37%
     kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # adx pre1，23171.92%，23171.92
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-07-01') # adx pre1，23171.92%，23171.92
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-07-01') # adx pre1，23171.92%，23171.92
     
     # 按月份
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-02-01') #
@@ -217,7 +219,7 @@ def main():
 
         
         # 二）有持仓：平仓信号计算，计算当前持仓的盈亏（当前k就可以平仓，因为实盘是1h k线）
-        elif current_position is not None:
+        else:
             # 当前信号数据
             current_symbol_row = current_timestamp_data[current_timestamp_data['symbol'] == current_position['symbol']].iloc[0]
             
@@ -304,10 +306,7 @@ def main():
                     break
             # 没有平仓信号，则需要更新最高价，供下次平仓信号计算
             else:
-                if float(current_symbol_row['high']) > current_position['history_highest_price']:
-                    current_position['history_highest_price'] = float(current_symbol_row['high'])
-
-        # print(current_position)
+                current_position['history_highest_price'] = max(float(current_symbol_row['high']), current_position['history_highest_price'])
 
     # 6. 保存结果到MongoDB
     trade_records = pd.DataFrame(trade_records_list)

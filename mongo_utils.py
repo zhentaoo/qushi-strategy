@@ -153,3 +153,55 @@ def query_data_by_timestamp(collection_name, start_timestamp_str, end_timestamp_
         print(f"查询 {collection_name} 失败: {e}")
         return pd.DataFrame()
 
+def remove_duplicates(collection_name):
+    """
+    删除表中重复的数据，唯一key 是 symbol + timestamp
+    保留最早插入的一条数据，删除其余重复的
+    """
+    db = get_db()
+    collection = db[collection_name]
+    
+    print(f"开始检查 {collection_name} 中的重复数据...")
+    
+    # 确保有索引以加速排序
+    try:
+        collection.create_index([("symbol", 1), ("timestamp", 1)], background=True)
+    except Exception as e:
+        print(f"创建索引失败 (可能已存在): {e}")
+
+    # 只查询必要的字段
+    cursor = collection.find({}, projection={'_id': 1, 'symbol': 1, 'timestamp': 1}).sort([('symbol', 1), ('timestamp', 1), ('_id', 1)])
+    
+    to_delete = []
+    last_key = None
+    count = 0
+    deleted_total = 0
+    
+    for doc in cursor:
+        current_key = (doc.get('symbol'), doc.get('timestamp'))
+        
+        if current_key == last_key:
+            to_delete.append(doc['_id'])
+        else:
+            last_key = current_key
+            
+        # 批量删除，防止内存占用过大
+        if len(to_delete) >= 1000:
+            result = collection.delete_many({'_id': {'$in': to_delete}})
+            deleted_count = result.deleted_count
+            deleted_total += deleted_count
+            print(f"已删除 {deleted_count} 条重复数据...")
+            to_delete = []
+            
+        count += 1
+        if count % 10000 == 0:
+            print(f"已扫描 {count} 条数据...")
+            
+    # 删除剩余的
+    if to_delete:
+        result = collection.delete_many({'_id': {'$in': to_delete}})
+        deleted_total += result.deleted_count
+        
+    print(f"扫描结束，共扫描 {count} 条数据，总计删除 {deleted_total} 条重复记录")
+    return deleted_total
+

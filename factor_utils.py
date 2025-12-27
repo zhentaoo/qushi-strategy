@@ -40,7 +40,7 @@ def compute_single_symbol_factor(g: pd.DataFrame):
         g[f'roc_{n}'] = (g['close'].pct_change(n) * 100)
 
     # ========= MA =========
-    for n in [3, 5, 10, 15, 20, 30]:
+    for n in [3, 5, 10, 15, 20,25, 30, 96]:
         g[f'ma{n}'] = ta.sma(g['close'], length=n)
         g[f'ma{n}_pre1'] = g[f'ma{n}'].shift(1)
         g[f'ma{n}_pre2'] = g[f'ma{n}'].shift(2)
@@ -58,7 +58,6 @@ def compute_single_symbol_factor(g: pd.DataFrame):
     # ========= ADX =========
     adx = ta.adx(g['high'], g['low'], g['close'], length=14)
     g['adx'] = safe_ta(adx, 'ADX_14')
-
 
     return g
 

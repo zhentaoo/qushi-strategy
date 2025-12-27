@@ -48,7 +48,7 @@ def get_candidate_symbols():
     # 排除部分知名币对
     blacklist = {
         # 超主流币
-        "BTCUSDT","ETHUSDT", "BNBUSDT", "SOLUSDT", 
+        # "BTCUSDT","ETHUSDT", "SOLUSDT", 
         # 平台币
         "BNBUSDT", "OKBUSDT", "HTUSDT", "GTUSDT", "KCSUSDT", "LEOUSDT",
         # 稳定币/锚定资产（不应出现在策略中）
