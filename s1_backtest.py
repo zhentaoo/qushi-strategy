@@ -141,9 +141,9 @@ def main():
     
     # 25年：
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-12-01') #  10593.37%
-    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # adx pre1，23171.92%，23171.92
+    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-12-01') # adx pre1，23171.92%，23171.92
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-06-01', '2025-07-01') # adx pre1，23171.92%，23171.92
-    # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-07-01') # adx pre1，23171.92%，23171.92
+    kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-07-01') # adx pre1，23171.92%，23171.92
     
     # 按月份
     # kline_df = mongo_utils.query_data_by_timestamp('symbol_1h_kline', '2025-01-01', '2025-02-01') #

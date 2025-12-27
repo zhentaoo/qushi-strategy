@@ -51,11 +51,13 @@ def generate_open_signal(current_data, top_n = 30):
         & (top_df['close_pre2'] > top_df['ma5_pre2'])
         & (top_df['close_pre3'] > top_df['ma5_pre3'])
         & (top_df['ma5'] > top_df['ma20'])
-        & (top_df['volume'] > top_df['volume_ma_10'] * 2) # 
-        # & (top_df['volume'] < top_df['volume_ma_10'] * 4) # 收益 510.39%
-        & (top_df['volume'] < top_df['volume_ma_10'] * 5) # 收益 2274%
-        # & (top_df['volume'] < top_df['volume_ma_10'] * 6) # 收益 999%
-        & (top_df['adx'] > 40) # 329.67%
+        & (top_df['volume'] > top_df['volume_ma_10'] * 2) 
+        & (top_df['volume'] < top_df['volume_ma_10'] * 5)
+        # & (top_df['adx'] > 38) #  -43.14%
+        # & (top_df['adx'] > 42) #  18.75%
+        # & (top_df['adx'] > 45) #  296.66%
+        & (top_df['adx'] > 55) # 950.03%
+        & (top_df['adx'] < 65) # 
     ].copy()
 
     if filtered_df.empty:
