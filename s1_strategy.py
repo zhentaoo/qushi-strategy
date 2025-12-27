@@ -111,16 +111,22 @@ def generate_close_signal(current_position, current_symbol_data):
 
 
     # 斩杀线, 每小时更新，只会向上移动
-    # atr_stop_price = history_highest_price - 0.1 * atr
+    fix_stop_price = entry_price - 0.7 * atr
     atr_stop_price = history_highest_price - 0.7 * atr
-    # atr_stop_price = history_highest_price - 1.2 * atr
+    
+    final_stop_price = max(
+        fix_stop_price,
+        atr_stop_price
+    )
 
     # 如果下一个k线开盘价低于ATR止损价，就平仓
-    if open_price <= atr_stop_price:
+    if open_price <= final_stop_price:
         print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"当前最高价: {history_highest_price}")
         print(f"当前最低价: {low_price}")
         print(f"当前ATR: {atr}")
+        print(f"fix_stop_price: {fix_stop_price}")
+        print(f"atr_stop_price: {atr_stop_price}")
         print(f"当前ATR止损价格 open_price: {open_price}")
         return {
             'symbol': current_position['symbol'],
@@ -131,19 +137,21 @@ def generate_close_signal(current_position, current_symbol_data):
         }
     
     # 如果下一个k线开盘比atr高，但是最低价比atr止损价低，就平仓
-    if low_price <= atr_stop_price:
+    if low_price < final_stop_price:
         print(f"当前时间: {datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"当前持仓: {current_position}")
         print(f"当前最高价: {history_highest_price}")
         print(f"当前最低价: {low_price}")
         print(f"当前ATR: {atr}")
-        print(f"当前ATR止损价格 atr_stop_price: {atr_stop_price}")
+        print(f"fix_stop_price: {fix_stop_price}")
+        print(f"atr_stop_price: {atr_stop_price}")
+        print(f"当前ATR止损价格 atr_stop_price: {final_stop_price}")
         return {
             'symbol': current_position['symbol'],
             'timestamp': int(current_symbol_data['timestamp']),
             'date_str': datetime.fromtimestamp(int(current_symbol_data['timestamp'])/1000, tz=ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M:%S'),
             'atr': atr,
-            'stop_price': atr_stop_price,
+            'stop_price': final_stop_price,
         }
 
     return None
